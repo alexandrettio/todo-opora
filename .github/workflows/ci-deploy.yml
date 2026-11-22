@@ -25,8 +25,15 @@ jobs:
           npm ci --prefix frontend
           ./scripts/check.sh
       - run: |
-          docker build -t opora-api:check backend
-          docker build -t opora-web:check -f deploy/Dockerfile.web .
+          docker build -t opora-api:${{ github.sha }} backend
+          docker build -t opora-web:${{ github.sha }} -f deploy/Dockerfile.web .
+          docker save opora-api:${{ github.sha }} opora-web:${{ github.sha }} | gzip > images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: images
+          path: images.tar.gz
+          retention-days: 1
+          compression-level: 0
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: check
@@ -38,6 +45,9 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: images
       - name: Configure SSH
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -52,4 +62,7 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
         run: |
-          git archive HEAD | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash /home/alexandret/opora/deploy.sh $GITHUB_SHA"
+          mkdir bundle
+          git archive HEAD | tar -x -C bundle
+          mv images.tar.gz bundle/
+          tar -czf - -C bundle . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash /home/alexandret/opora/deploy.sh $GITHUB_SHA"

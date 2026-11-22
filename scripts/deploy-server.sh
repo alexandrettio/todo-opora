@@ -10,16 +10,18 @@ flock -w 1800 9
 release="$root/releases/$revision"
 # Retries use a fresh directory; the active release is never overwritten.
 release=$(mktemp -d "$release.XXXXXX")
-tar -x -C "$release"
+tar -xz -C "$release"
 ln -s "$root/.env" "$release/.env"
 cd "$release"
 compose=(docker compose --project-name opora -f compose.yaml -f deploy/compose.server.yaml)
+export DEPLOY_REVISION="$revision"
 "${compose[@]}" config --quiet
-"${compose[@]}" build --pull
+gzip -dc images.tar.gz | docker load
+rm images.tar.gz
 if "${compose[@]}" ps --status running --services | grep -qx db; then
   "${compose[@]}" exec -T db pg_dump -U opora -d opora -Fc > "$root/backups/$(date -u +%Y%m%dT%H%M%SZ)-$revision.dump"
 fi
-if ! "${compose[@]}" up -d --wait --wait-timeout 240; then
+if ! "${compose[@]}" up -d --no-build --wait --wait-timeout 240; then
   "${compose[@]}" ps
   "${compose[@]}" logs --tail=80 api web worker
   echo 'Deployment failed; inspect logs and database migrations before rollback.' >&2

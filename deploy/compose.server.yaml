@@ -1,5 +1,10 @@
 # Used together with compose.yaml; keep the existing host Nginx ports free.
 services:
+  api:
+    image: opora-api:${DEPLOY_REVISION:?Set DEPLOY_REVISION}
+  worker:
+    image: opora-api:${DEPLOY_REVISION:?Set DEPLOY_REVISION}
   web:
+    image: opora-web:${DEPLOY_REVISION:?Set DEPLOY_REVISION}
     ports: !override
       - "8088:80"
