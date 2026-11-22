@@ -1,0 +1,1660 @@
+openapi: 3.0.3
+info:
+  title: Опора API
+  version: 1.0.0
+paths:
+  /api/board/:
+    get:
+      operationId: board_retrieve
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      tags:
+      - board
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Board'
+          description: ''
+  /api/captures/:
+    get:
+      operationId: captures_list
+      tags:
+      - captures
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Capture'
+          description: ''
+    post:
+      operationId: captures_create
+      tags:
+      - captures
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Capture'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Capture'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Capture'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capture'
+          description: ''
+  /api/captures/{id}/:
+    get:
+      operationId: captures_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this capture.
+        required: true
+      tags:
+      - captures
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capture'
+          description: ''
+    patch:
+      operationId: captures_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this capture.
+        required: true
+      tags:
+      - captures
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCapture'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCapture'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCapture'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capture'
+          description: ''
+  /api/captures/{id}/resolve/:
+    post:
+      operationId: captures_resolve_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this capture.
+        required: true
+      tags:
+      - captures
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResolveCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResolveCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capture'
+          description: ''
+  /api/events/:
+    get:
+      operationId: events_list
+      tags:
+      - events
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+          description: ''
+    post:
+      operationId: events_create
+      tags:
+      - events
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Event'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Event'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Event'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+  /api/events/{id}/:
+    get:
+      operationId: events_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this calendar occurrence.
+        required: true
+      tags:
+      - events
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+  /api/events/{id}/check/:
+    post:
+      operationId: events_check_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this calendar occurrence.
+        required: true
+      tags:
+      - events
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CheckCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CheckCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+          description: ''
+  /api/export/:
+    get:
+      operationId: export_retrieve
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      tags:
+      - export
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            text/markdown:
+              schema:
+                type: string
+          description: ''
+  /api/google/calendars/:
+    post:
+      operationId: google_calendars_create
+      tags:
+      - google
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/google/disconnect/:
+    post:
+      operationId: google_disconnect_create
+      tags:
+      - google
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/google/settings/:
+    post:
+      operationId: google_settings_create
+      tags:
+      - google
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleSettings'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GoogleSettings'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GoogleSettings'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/google/start/:
+    get:
+      operationId: google_start_retrieve
+      tags:
+      - google
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleStart'
+          description: ''
+  /api/google/sync/:
+    post:
+      operationId: google_sync_create
+      tags:
+      - google
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/items/:
+    get:
+      operationId: items_list
+      tags:
+      - items
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Item'
+          description: ''
+    post:
+      operationId: items_create
+      tags:
+      - items
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Item'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Item'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+          description: ''
+  /api/items/{id}/:
+    get:
+      operationId: items_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+          description: ''
+    patch:
+      operationId: items_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedItem'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedItem'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedItem'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+          description: ''
+  /api/items/{id}/closure/:
+    get:
+      operationId: items_closure_list
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Item'
+          description: ''
+  /api/items/{id}/history/:
+    get:
+      operationId: items_history_list
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/History'
+          description: ''
+  /api/items/{id}/plan/:
+    post:
+      operationId: items_plan_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+          description: ''
+  /api/items/{id}/state/:
+    post:
+      operationId: items_state_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this item.
+        required: true
+      tags:
+      - items
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StateCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StateCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StateCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+          description: ''
+  /api/login/:
+    post:
+      operationId: login_create
+      tags:
+      - login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+          description: ''
+  /api/logout/:
+    post:
+      operationId: logout_create
+      tags:
+      - logout
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/plans/:
+    get:
+      operationId: plans_list
+      tags:
+      - plans
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Entry'
+          description: ''
+    post:
+      operationId: plans_create
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Entry'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Entry'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Entry'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+          description: ''
+  /api/plans/{id}/:
+    get:
+      operationId: plans_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this plan entry.
+        required: true
+      tags:
+      - plans
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+          description: ''
+  /api/plans/{id}/organize/:
+    post:
+      operationId: plans_organize_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this plan entry.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizeCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizeCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizeCommand'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+          description: ''
+  /api/plans/{id}/release/:
+    post:
+      operationId: plans_release_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this plan entry.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReleaseCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReleaseCommand'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/schema/:
+    get:
+      operationId: schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - schema
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/session/:
+    get:
+      operationId: session_retrieve
+      tags:
+      - session
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+  /api/settings/day-sections/:
+    get:
+      operationId: settings_day_sections_retrieve
+      tags:
+      - settings
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaySections'
+          description: ''
+    patch:
+      operationId: settings_day_sections_partial_update
+      tags:
+      - settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDaySections'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDaySections'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDaySections'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaySections'
+          description: ''
+components:
+  schemas:
+    Area:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 160
+        color:
+          type: string
+          maxLength: 20
+        order:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+      required:
+      - id
+      - name
+    Board:
+      type: object
+      properties:
+        today:
+          type: string
+          format: date
+        week:
+          type: string
+          format: date
+        areas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Area'
+        captures:
+          type: array
+          items:
+            $ref: '#/components/schemas/Capture'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+        inbox_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        day_sections:
+          type: array
+          items:
+            type: string
+        day_entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entry'
+        week_rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeekRow'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        google:
+          $ref: '#/components/schemas/GoogleStatus'
+      required:
+      - areas
+      - captures
+      - day_entries
+      - day_sections
+      - events
+      - google
+      - inbox_ids
+      - items
+      - today
+      - week
+      - week_rows
+    Capture:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        text:
+          type: string
+        source:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/CaptureStatusEnum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        results:
+          type: array
+          items:
+            type: string
+            format: uuid
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - results
+      - source
+      - status
+      - text
+    CaptureStatusEnum:
+      enum:
+      - open
+      - processed
+      - graveyard
+      type: string
+      description: |-
+        * `open` - Не разобрана
+        * `processed` - Разобрана
+        * `graveyard` - Кладбище
+    CheckCommand:
+      type: object
+      properties:
+        done:
+          type: boolean
+      required:
+      - done
+    DaySections:
+      type: object
+      properties:
+        sections:
+          type: array
+          items:
+            type: string
+            maxLength: 160
+          maxItems: 40
+      required:
+      - sections
+    Entry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        item:
+          type: string
+          format: uuid
+        item_detail:
+          allOf:
+          - $ref: '#/components/schemas/Item'
+          readOnly: true
+        period:
+          $ref: '#/components/schemas/EntryPeriodEnum'
+        date:
+          type: string
+          format: date
+        active:
+          type: boolean
+          default: true
+        outcome:
+          type: string
+          maxLength: 16
+        section:
+          type: string
+          maxLength: 160
+        position:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        checked:
+          type: boolean
+          readOnly: true
+      required:
+      - checked
+      - created_at
+      - date
+      - id
+      - item
+      - item_detail
+      - period
+    EntryPeriodEnum:
+      enum:
+      - day
+      - week
+      type: string
+      description: |-
+        * `day` - День
+        * `week` - Неделя
+    Event:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          maxLength: 500
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        all_day:
+          type: boolean
+        done:
+          type: boolean
+        url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 2000
+          - type: string
+            maxLength: 0
+        calendar_id:
+          type: string
+          maxLength: 500
+      required:
+      - calendar_id
+      - end
+      - id
+      - start
+      - title
+    GoogleCalendar:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        primary:
+          type: boolean
+      required:
+      - id
+      - name
+    GoogleSettings:
+      type: object
+      properties:
+        selected:
+          type: array
+          items:
+            type: string
+      required:
+      - selected
+    GoogleStart:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+      required:
+      - url
+    GoogleStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        connected:
+          type: boolean
+        calendars:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoogleCalendar'
+        selected:
+          type: array
+          items:
+            type: string
+        last_sync:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+      required:
+      - calendars
+      - configured
+      - connected
+      - last_error
+      - last_sync
+      - selected
+    History:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        event:
+          type: string
+          maxLength: 80
+        data: {}
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - event
+      - id
+    Item:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        resolve_capture:
+          type: boolean
+          writeOnly: true
+        planned_day:
+          type: string
+          format: date
+          writeOnly: true
+        planned_week:
+          type: string
+          format: date
+          writeOnly: true
+        planned_section:
+          type: string
+          writeOnly: true
+          maxLength: 160
+        title:
+          type: string
+          maxLength: 500
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ItemStatusEnum'
+          readOnly: true
+        parent:
+          type: string
+          format: uuid
+          nullable: true
+        capture:
+          type: string
+          format: uuid
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: integer
+        comment:
+          type: string
+        result_comment:
+          type: string
+        deadline:
+          type: string
+          format: date
+          nullable: true
+        available_from:
+          type: string
+          format: date
+          nullable: true
+        location:
+          type: string
+          maxLength: 200
+        tags: {}
+        estimated_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        title_changed_at:
+          type: string
+          format: date-time
+          readOnly: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        has_week_commitment:
+          type: boolean
+          readOnly: true
+        schedule:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        stale:
+          type: boolean
+          readOnly: true
+        no_next_step:
+          type: boolean
+          readOnly: true
+      required:
+      - completed_at
+      - created_at
+      - has_week_commitment
+      - id
+      - no_next_step
+      - schedule
+      - stale
+      - status
+      - title
+      - title_changed_at
+      - updated_at
+    ItemStatusEnum:
+      enum:
+      - open
+      - done
+      - graveyard
+      type: string
+      description: |-
+        * `open` - Открыто
+        * `done` - Выполнено
+        * `graveyard` - Кладбище
+    KindEnum:
+      enum:
+      - task
+      - project
+      - idea
+      type: string
+      description: |-
+        * `task` - Задача
+        * `project` - Проект
+        * `idea` - Идея
+    Login:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+      - username
+    LoginResult:
+      type: object
+      properties:
+        username:
+          type: string
+        csrf:
+          type: string
+      required:
+      - csrf
+      - username
+    Ok:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
+    OrganizeCommand:
+      type: object
+      properties:
+        section:
+          type: string
+        position:
+          type: integer
+          minimum: 0
+    PatchedCapture:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        text:
+          type: string
+        source:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/CaptureStatusEnum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        results:
+          type: array
+          items:
+            type: string
+            format: uuid
+          readOnly: true
+    PatchedDaySections:
+      type: object
+      properties:
+        sections:
+          type: array
+          items:
+            type: string
+            maxLength: 160
+          maxItems: 40
+    PatchedItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        resolve_capture:
+          type: boolean
+          writeOnly: true
+        planned_day:
+          type: string
+          format: date
+          writeOnly: true
+        planned_week:
+          type: string
+          format: date
+          writeOnly: true
+        planned_section:
+          type: string
+          writeOnly: true
+          maxLength: 160
+        title:
+          type: string
+          maxLength: 500
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ItemStatusEnum'
+          readOnly: true
+        parent:
+          type: string
+          format: uuid
+          nullable: true
+        capture:
+          type: string
+          format: uuid
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: integer
+        comment:
+          type: string
+        result_comment:
+          type: string
+        deadline:
+          type: string
+          format: date
+          nullable: true
+        available_from:
+          type: string
+          format: date
+          nullable: true
+        location:
+          type: string
+          maxLength: 200
+        tags: {}
+        estimated_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        title_changed_at:
+          type: string
+          format: date-time
+          readOnly: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        has_week_commitment:
+          type: boolean
+          readOnly: true
+        schedule:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        stale:
+          type: boolean
+          readOnly: true
+        no_next_step:
+          type: boolean
+          readOnly: true
+    PlanCommand:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/PlanCommandPeriodEnum'
+        date:
+          type: string
+          format: date
+        section:
+          type: string
+      required:
+      - date
+      - period
+    PlanCommandPeriodEnum:
+      enum:
+      - day
+      - week
+      type: string
+      description: |-
+        * `day` - day
+        * `week` - week
+    ReleaseCommand:
+      type: object
+      properties:
+        reason:
+          type: string
+    ResolveCommand:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResolveCommandStatusEnum'
+      required:
+      - status
+    ResolveCommandStatusEnum:
+      enum:
+      - open
+      - processed
+      - graveyard
+      type: string
+      description: |-
+        * `open` - open
+        * `processed` - processed
+        * `graveyard` - graveyard
+    Session:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        username:
+          type: string
+          nullable: true
+        csrf:
+          type: string
+        today:
+          type: string
+          format: date
+        week:
+          type: string
+          format: date
+      required:
+      - authenticated
+      - csrf
+      - today
+      - username
+      - week
+    StateCommand:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StateCommandStatusEnum'
+        reason:
+          type: string
+        result_comment:
+          type: string
+      required:
+      - status
+    StateCommandStatusEnum:
+      enum:
+      - open
+      - done
+      - graveyard
+      type: string
+      description: |-
+        * `open` - open
+        * `done` - done
+        * `graveyard` - graveyard
+    WeekRow:
+      type: object
+      properties:
+        item:
+          $ref: '#/components/schemas/Item'
+        scheduled_day:
+          type: string
+          format: date
+          nullable: true
+        direct:
+          type: boolean
+        inherited:
+          type: boolean
+        active:
+          type: boolean
+        entry_id:
+          type: string
+          format: uuid
+          nullable: true
+        outcome:
+          type: string
+        reason:
+          type: string
+      required:
+      - active
+      - direct
+      - entry_id
+      - inherited
+      - item
+      - outcome
+      - reason
+      - scheduled_day
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

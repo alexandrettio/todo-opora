@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+**/node_modules
+**/dist
+**/__pycache__
+**/*.sqlite3
+**/staticfiles
+
+.env.*
+!.env.example
+.local
+docs
+**/*.tsbuildinfo
+**/*.dump
+**/*.log
