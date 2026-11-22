@@ -61,8 +61,14 @@ jobs:
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           mkdir bundle
           git archive HEAD | tar -x -C bundle
           mv images.tar.gz bundle/
-          tar -czf - -C bundle . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash /home/alexandret/opora/deploy.sh $GITHUB_SHA"
+          tar -czf bundle.tar.gz -C bundle .
+          mkdir chunks
+          split -b 1M -d -a 4 bundle.tar.gz chunks/part-
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /home/alexandret/opora/incoming/$DEPLOY_SHA"
+          find chunks -type f -print0 | xargs -0 -P 4 -I '{}' bash -c 'scp -q -o BatchMode=yes -o StrictHostKeyChecking=yes "$1" "$DEPLOY_USER@$DEPLOY_HOST:/home/alexandret/opora/incoming/$DEPLOY_SHA/"' _ '{}'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "set -o pipefail; cat /home/alexandret/opora/incoming/$DEPLOY_SHA/part-* | bash /home/alexandret/opora/deploy.sh $DEPLOY_SHA && rm -r /home/alexandret/opora/incoming/$DEPLOY_SHA"
