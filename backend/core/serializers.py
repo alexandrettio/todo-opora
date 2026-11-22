@@ -132,14 +132,16 @@ class ItemSerializer(serializers.ModelSerializer):
             or parent.status != "open"
         ):
             raise serializers.ValidationError({"parent": "Нужен твой открытый проект."})
-        if (
-            self.instance
-            and "parent" in data
-            and data["parent"] != self.instance.parent
-        ):
-            raise serializers.ValidationError(
-                {"parent": "Перенос между проектами не поддерживается."}
-            )
+        if self.instance and "parent" in data:
+            seen = {self.instance.pk}
+            ancestor = parent
+            while ancestor:
+                if ancestor.pk in seen:
+                    raise serializers.ValidationError(
+                        {"parent": "Нельзя выбрать само дело или его потомка: возникнет цикл."}
+                    )
+                seen.add(ancestor.pk)
+                ancestor = ancestor.parent
         if "resolve_capture" in data and (self.instance or not capture):
             raise serializers.ValidationError(
                 {"resolve_capture": "Этот выбор доступен при создании дела из мысли."}

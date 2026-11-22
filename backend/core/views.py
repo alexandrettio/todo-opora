@@ -122,6 +122,14 @@ class ItemViewSet(OwnedViewSet):
         old = self.get_object()
         before = dict(self.get_serializer(old).data)
         item = serializer.save()
+        if str(before["parent"]) != str(item.parent_id):
+            for member in [item, *descendants(item)]:
+                parent_ids = [parent.id for parent in ancestors(member)]
+                InheritedPlanning.objects.filter(
+                    item=member, ended_at__isnull=True,
+                    source__date__gte=week_start(planning_day()),
+                ).exclude(source__item_id__in=parent_ids).update(ended_at=timezone.now())
+                sync_inheritance(member)
         record(
             item,
             "updated",

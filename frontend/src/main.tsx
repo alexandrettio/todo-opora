@@ -2281,6 +2281,17 @@ function ItemEditor({
     [tags, setTags] = useState(item?.tags.join(", ") || ""),
     [minutes, setMinutes] = useState(item?.estimated_minutes?.toString() || ""),
     [localError, setLocalError] = useState("");
+  const forbiddenParents = new Set<string>();
+  if (item) {
+    forbiddenParents.add(item.id);
+    let frontier = [item.id];
+    while (frontier.length) {
+      frontier = board.items
+        .filter((candidate) => candidate.parent && frontier.includes(candidate.parent) && !forbiddenParents.has(candidate.id))
+        .map((candidate) => candidate.id);
+      frontier.forEach((id) => forbiddenParents.add(id));
+    }
+  }
   const [resolveCapture, setResolveCapture] = useState(true);
   const [capturePlan, setCapturePlan] = useState("none");
   const [captureDate, setCaptureDate] = useState(board.today);
@@ -2330,9 +2341,10 @@ function ItemEditor({
               ...(!item && plannedWeek && kind !== "idea"
                 ? { planned_week: plannedWeek }
                 : {}),
-              ...(!item
-                ? { parent: parent || null, capture: initial.capture || null }
+              ...(!item || parent !== (item.parent || "")
+                ? { parent: parent || null }
                 : {}),
+              ...(!item ? { capture: initial.capture || null } : {}),
               ...(!item && initial.capture
                 ? { resolve_capture: resolveCapture }
                 : {}),
@@ -2410,15 +2422,14 @@ function ItemEditor({
               Внутри проекта
               <select
                 value={parent}
-                disabled={!!item}
                 onChange={(e) => {
                   setParent(e.target.value);
-                  setAreas(board.items.find((i) => i.id === e.target.value)?.areas || []);
+                  if (!item) setAreas(board.items.find((i) => i.id === e.target.value)?.areas || []);
                 }}
               >
                 <option value="">Самостоятельное дело</option>
                 {board.items
-                  .filter((i) => i.kind === "project" && i.status === "open")
+                  .filter((i) => i.kind === "project" && i.status === "open" && !forbiddenParents.has(i.id))
                   .map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.title}

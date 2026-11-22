@@ -13,6 +13,7 @@ from .models import (
     History,
     CalendarOccurrence,
     GoogleConnection,
+    InheritedPlanning,
 )
 from .domain import (
     planning_day,
@@ -318,18 +319,55 @@ class ApiTests(TestCase):
         )
         self.assertEqual(self.client.get("/api/board/").data["items"], [])
 
-    def test_parent_change_and_invalid_conversion_rejected(self):
+    def test_parent_change_and_detach(self):
         p = self.create(kind="project")
-        t = self.create(parent=p["id"])
-        self.assertEqual(
-            self.client.patch(
-                f'/api/items/{t["id"]}/', {"parent": None}, format="json"
-            ).status_code,
-            400,
+        other = self.create(kind="project")
+        task = self.create(parent=p["id"])
+        for parent in [other["id"], None, p["id"]]:
+            response = self.client.patch(
+                f'/api/items/{task["id"]}/', {"parent": parent}, format="json"
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(str(response.data["parent"]) if parent else response.data["parent"], parent)
+            self.assertEqual(str(Item.objects.get(pk=task["id"]).parent_id) if parent else None, parent)
+
+    def test_reparenting_updates_inherited_week_for_subtree(self):
+        old = self.create(kind="project")
+        new = self.create(kind="project")
+        project = self.create(kind="project", parent=old["id"])
+        task = self.create(parent=project["id"])
+        for parent in [old, new]:
+            response = self.client.post(
+                f'/api/items/{parent["id"]}/plan/',
+                {"period": "week", "date": str(planning_day())}, format="json",
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+        response = self.client.patch(
+            f'/api/items/{project["id"]}/', {"parent": new["id"]}, format="json"
         )
+        self.assertEqual(response.status_code, 200, response.data)
+        for member in [project, task]:
+            active = InheritedPlanning.objects.filter(item_id=member["id"], ended_at__isnull=True)
+            self.assertFalse(active.filter(source__item_id=old["id"]).exists())
+            self.assertTrue(active.filter(source__item_id=new["id"]).exists())
+
+    def test_parent_cycles_rejected(self):
+        root = self.create(kind="project")
+        child = self.create(kind="project", parent=root["id"])
+        leaf = self.create(kind="project", parent=child["id"])
+        for parent in [root["id"], child["id"], leaf["id"]]:
+            response = self.client.patch(
+                f'/api/items/{root["id"]}/', {"parent": parent}, format="json"
+            )
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertIn("parent", response.data)
+            self.assertIsNone(Item.objects.get(pk=root["id"]).parent_id)
+
+    def test_invalid_conversion_rejected(self):
+        project = self.create(kind="project")
         self.assertEqual(
             self.client.patch(
-                f'/api/items/{p["id"]}/', {"kind": "idea"}, format="json"
+                f'/api/items/{project["id"]}/', {"kind": "idea"}, format="json"
             ).status_code,
             400,
         )
