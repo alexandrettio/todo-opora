@@ -1,0 +1,5 @@
+# Used together with compose.yaml; keep the existing host Nginx ports free.
+services:
+  web:
+    ports: !override
+      - "8088:80"
