@@ -14,6 +14,9 @@ tar -xz -C "$release"
 ln -s "$root/.env" "$release/.env"
 cd "$release"
 compose=(docker compose --project-name opora -f compose.yaml -f deploy/compose.server.yaml)
+if [[ -f "$root/compose.local.yaml" ]]; then
+  compose+=(-f "$root/compose.local.yaml")
+fi
 export DEPLOY_REVISION="$revision"
 "${compose[@]}" config --quiet
 gzip -dc images.tar.gz | docker load
