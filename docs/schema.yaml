@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Опора API
-  version: 1.0.0
+  version: 2.0.0
 paths:
   /api/board/:
     get:
@@ -351,6 +351,219 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ok'
           description: ''
+  /api/habit-board/:
+    get:
+      operationId: habit_board_retrieve
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      tags:
+      - habit-board
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitBoard'
+          description: ''
+  /api/habits/:
+    get:
+      operationId: habits_list
+      tags:
+      - habits
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HabitResult'
+          description: ''
+    post:
+      operationId: habits_create
+      tags:
+      - habits
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResult'
+          description: ''
+  /api/habits/{id}/:
+    get:
+      operationId: habits_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this habit.
+        required: true
+      tags:
+      - habits
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResult'
+          description: ''
+  /api/habits/{id}/log/:
+    post:
+      operationId: habits_log_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this habit.
+        required: true
+      tags:
+      - habits
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LogCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LogCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Log'
+          description: ''
+  /api/habits/{id}/pause/:
+    post:
+      operationId: habits_pause_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this habit.
+        required: true
+      tags:
+      - habits
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pause'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Pause'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Pause'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pause'
+          description: ''
+  /api/habits/{id}/pauses/{pause_id}/cancel/:
+    post:
+      operationId: habits_pauses_cancel_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this habit.
+        required: true
+      - in: path
+        name: pause_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - habits
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pause'
+          description: ''
+  /api/habits/{id}/revise/:
+    post:
+      operationId: habits_revise_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this habit.
+        required: true
+      tags:
+      - habits
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HabitDefinition'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResult'
+          description: ''
   /api/items/:
     get:
       operationId: items_list
@@ -603,6 +816,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ok'
           description: ''
+  /api/planning/:
+    get:
+      operationId: planning_retrieve
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: period
+        schema:
+          type: string
+          enum:
+          - month
+          - quarter
+          - week
+      tags:
+      - planning
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningResult'
+          description: ''
   /api/plans/:
     get:
       operationId: plans_list
@@ -731,6 +972,230 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ok'
+          description: ''
+  /api/plans/{id}/transfer/:
+    post:
+      operationId: plans_transfer_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this plan entry.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+          description: ''
+  /api/reflection-templates/:
+    get:
+      operationId: reflection_templates_list
+      tags:
+      - reflection-templates
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Template'
+          description: ''
+    post:
+      operationId: reflection_templates_create
+      tags:
+      - reflection-templates
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Template'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Template'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Template'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+          description: ''
+  /api/reflection-templates/{id}/:
+    get:
+      operationId: reflection_templates_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this reflection template.
+        required: true
+      tags:
+      - reflection-templates
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+          description: ''
+    patch:
+      operationId: reflection_templates_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this reflection template.
+        required: true
+      tags:
+      - reflection-templates
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTemplate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTemplate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTemplate'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+          description: ''
+  /api/reflections/:
+    get:
+      operationId: reflections_list
+      tags:
+      - reflections
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Reflection'
+          description: ''
+    post:
+      operationId: reflections_create
+      tags:
+      - reflections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reflection'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Reflection'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Reflection'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reflection'
+          description: ''
+  /api/reflections/{id}/:
+    get:
+      operationId: reflections_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this reflection.
+        required: true
+      tags:
+      - reflections
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reflection'
+          description: ''
+    patch:
+      operationId: reflections_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this reflection.
+        required: true
+      tags:
+      - reflections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedReflection'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedReflection'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedReflection'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reflection'
           description: ''
   /api/schema/:
     get:
@@ -1057,6 +1522,16 @@ components:
           type: boolean
       required:
       - done
+    CounterPeriodEnum:
+      enum:
+      - day
+      - week
+      - month
+      type: string
+      description: |-
+        * `day` - День
+        * `week` - Неделя
+        * `month` - Месяц
     DaySections:
       type: object
       properties:
@@ -1122,10 +1597,14 @@ components:
       enum:
       - day
       - week
+      - month
+      - quarter
       type: string
       description: |-
         * `day` - День
         * `week` - Неделя
+        * `month` - Месяц
+        * `quarter` - Квартал
     Event:
       type: object
       properties:
@@ -1219,6 +1698,104 @@ components:
       - last_error
       - last_sync
       - selected
+    HabitBoard:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        week:
+          type: string
+          format: date
+        habits:
+          type: array
+          items:
+            $ref: '#/components/schemas/HabitResult'
+      required:
+      - date
+      - habits
+      - week
+    HabitDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        effective_from:
+          type: string
+          format: date
+        title:
+          type: string
+          maxLength: 500
+        areas:
+          type: array
+          items:
+            type: integer
+        section:
+          type: string
+          maxLength: 160
+        archived:
+          type: boolean
+        start_date:
+          type: string
+          format: date
+        mode:
+          $ref: '#/components/schemas/ModeEnum'
+        interval:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        weekdays: {}
+        monthdays: {}
+        last_day:
+          type: boolean
+        target:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        counter_period:
+          $ref: '#/components/schemas/CounterPeriodEnum'
+      required:
+      - effective_from
+      - id
+      - mode
+      - start_date
+      - title
+    HabitResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        definition:
+          allOf:
+          - $ref: '#/components/schemas/HabitDefinition'
+          nullable: true
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/HabitDefinition'
+        pauses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pause'
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Log'
+        cells:
+          type: array
+          items: {}
+      required:
+      - cells
+      - definition
+      - id
+      - logs
+      - pauses
+      - versions
     History:
       type: object
       properties:
@@ -1253,6 +1830,14 @@ components:
           format: date
           writeOnly: true
         planned_week:
+          type: string
+          format: date
+          writeOnly: true
+        planned_month:
+          type: string
+          format: date
+          writeOnly: true
+        planned_quarter:
           type: string
           format: date
           writeOnly: true
@@ -1367,6 +1952,82 @@ components:
         * `task` - Задача
         * `project` - Проект
         * `idea` - Идея
+    Log:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        date:
+          type: string
+          format: date
+        count:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        state:
+          $ref: '#/components/schemas/LogStateEnum'
+        section:
+          type: string
+          nullable: true
+          maxLength: 160
+        note:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date
+      - id
+      - updated_at
+    LogCommand:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        delta:
+          type: integer
+          maximum: 1000000
+          minimum: -1000000
+        count:
+          type: integer
+          maximum: 1000000
+          minimum: 0
+        state:
+          $ref: '#/components/schemas/LogCommandStateEnum'
+        section:
+          type: string
+          nullable: true
+          maxLength: 160
+        note:
+          type: string
+          maxLength: 50000
+      required:
+      - date
+    LogCommandStateEnum:
+      enum:
+      - recorded
+      - skipped
+      - unrecorded
+      type: string
+      description: |-
+        * `recorded` - recorded
+        * `skipped` - skipped
+        * `unrecorded` - unrecorded
+    LogStateEnum:
+      enum:
+      - recorded
+      - skipped
+      - unrecorded
+      type: string
+      description: |-
+        * `recorded` - Записано
+        * `skipped` - Пропущено
+        * `unrecorded` - Нет записи
     Login:
       type: object
       properties:
@@ -1388,6 +2049,18 @@ components:
       required:
       - csrf
       - username
+    ModeEnum:
+      enum:
+      - weekdays
+      - interval
+      - monthdays
+      - after
+      type: string
+      description: |-
+        * `weekdays` - Дни недели
+        * `interval` - Каждые N дней
+        * `monthdays` - Числа месяца
+        * `after` - После выполнения
     Ok:
       type: object
       properties:
@@ -1453,6 +2126,14 @@ components:
           format: date
           writeOnly: true
         planned_week:
+          type: string
+          format: date
+          writeOnly: true
+        planned_month:
+          type: string
+          format: date
+          writeOnly: true
+        planned_quarter:
           type: string
           format: date
           writeOnly: true
@@ -1535,11 +2216,69 @@ components:
         no_next_step:
           type: boolean
           readOnly: true
+    PatchedReflection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        period:
+          $ref: '#/components/schemas/ReflectionPeriodEnum'
+        date:
+          type: string
+          format: date
+        body:
+          type: string
+        template_snapshot:
+          type: string
+          readOnly: true
+        revision:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        period:
+          $ref: '#/components/schemas/ReflectionPeriodEnum'
+        body:
+          type: string
+    Pause:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        cancelled:
+          type: boolean
+          readOnly: true
+      required:
+      - cancelled
+      - end
+      - id
+      - start
     PlanCommand:
       type: object
       properties:
         period:
-          $ref: '#/components/schemas/PlanCommandPeriodEnum'
+          $ref: '#/components/schemas/PlanPeriodEnum'
         date:
           type: string
           format: date
@@ -1548,14 +2287,91 @@ components:
       required:
       - date
       - period
-    PlanCommandPeriodEnum:
+    PlanPeriodEnum:
       enum:
       - day
       - week
+      - month
+      - quarter
       type: string
       description: |-
         * `day` - day
         * `week` - week
+        * `month` - month
+        * `quarter` - quarter
+    PlanningResult:
+      type: object
+      properties:
+        period:
+          type: string
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        entries:
+          type: array
+          items: {}
+        suggestions:
+          type: array
+          items: {}
+        previous:
+          type: array
+          items: {}
+      required:
+      - end
+      - entries
+      - period
+      - previous
+      - start
+      - suggestions
+    Reflection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        period:
+          $ref: '#/components/schemas/ReflectionPeriodEnum'
+        date:
+          type: string
+          format: date
+        body:
+          type: string
+        template_snapshot:
+          type: string
+          readOnly: true
+        revision:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date
+      - id
+      - period
+      - template_snapshot
+      - updated_at
+    ReflectionPeriodEnum:
+      enum:
+      - day
+      - week
+      - month
+      - quarter
+      - year
+      type: string
+      description: |-
+        * `day` - day
+        * `week` - week
+        * `month` - month
+        * `quarter` - quarter
+        * `year` - year
     ReleaseCommand:
       type: object
       properties:
@@ -1621,6 +2437,20 @@ components:
         * `open` - open
         * `done` - done
         * `graveyard` - graveyard
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        period:
+          $ref: '#/components/schemas/ReflectionPeriodEnum'
+        body:
+          type: string
+      required:
+      - id
+      - period
     WeekRow:
       type: object
       properties:

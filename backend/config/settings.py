@@ -77,7 +77,12 @@ REST_FRAMEWORK = {
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Опора API",
-    "VERSION": "1.0.0",
+    "VERSION": "2.0.0",
+    "ENUM_NAME_OVERRIDES": {
+        "PlanPeriodEnum": ["day", "week", "month", "quarter"],
+        "ReflectionPeriodEnum": ["day", "week", "month", "quarter", "year"],
+        "CounterPeriodEnum": ["day", "week", "month"],
+    },
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
 }
 CSRF_TRUSTED_ORIGINS = [

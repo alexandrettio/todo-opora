@@ -2,14 +2,19 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from core import views
+from core import views, habit_api, reflection_api, planning_api
 
 router = DefaultRouter()
 router.register("captures", views.CaptureViewSet)
 router.register("items", views.ItemViewSet)
 router.register("plans", views.PlanViewSet)
 router.register("events", views.EventViewSet)
+router.register("habits", habit_api.HabitViewSet)
+router.register("reflections", reflection_api.ReflectionViewSet)
+router.register("reflection-templates", reflection_api.TemplateViewSet)
 urlpatterns = [
+    path("api/habit-board/", habit_api.habit_board),
+    path("api/planning/", planning_api.planning),
     path("admin/", admin.site.urls),
     path("api/session/", views.session),
     path("api/login/", views.sign_in),

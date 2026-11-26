@@ -197,6 +197,23 @@ class PlanViewSet(OwnedViewSet):
         release(self.get_object(), str(request.data.get("reason", "")))
         return Response({"ok": True})
 
+    @extend_schema(request=contracts.PlanCommand, responses=EntrySerializer)
+    @action(detail=True, methods=["post"])
+    def transfer(self, request, pk=None):
+        payload = contracts.PlanCommand(data=request.data)
+        payload.is_valid(raise_exception=True)
+        entry = self.get_object()
+        data = payload.validated_data
+        if entry.period not in ["month", "quarter"] or data["period"] != entry.period or not entry.active:
+            raise ValidationError("Перенос доступен для действующего предложения месяца или квартала.")
+        if period_start(entry.period, data["date"]) <= entry.date:
+            raise ValidationError("Выбери более поздний период.")
+        new = assign(entry.item, entry.period, data["date"])
+        entry.active, entry.outcome, entry.ended_at = False, "moved", timezone.now()
+        entry.save()
+        record(entry.item, "proposal_moved", period=entry.period, source=str(entry.date), destination=str(new.date))
+        return Response(EntrySerializer(new).data)
+
     @extend_schema(request=contracts.OrganizeCommand, responses=EntrySerializer)
     @action(detail=True, methods=["post"])
     def organize(self, request, pk=None):

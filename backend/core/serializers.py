@@ -29,6 +29,8 @@ class ItemSerializer(serializers.ModelSerializer):
     resolve_capture = serializers.BooleanField(write_only=True, required=False)
     planned_week = serializers.DateField(write_only=True, required=False)
     planned_day = serializers.DateField(write_only=True, required=False)
+    planned_month = serializers.DateField(write_only=True, required=False)
+    planned_quarter = serializers.DateField(write_only=True, required=False)
     planned_section = serializers.CharField(
         write_only=True, required=False, allow_blank=True, max_length=160
     )
@@ -44,6 +46,8 @@ class ItemSerializer(serializers.ModelSerializer):
             "resolve_capture",
             "planned_day",
             "planned_week",
+            "planned_month",
+            "planned_quarter",
             "planned_section",
             "title",
             "kind",
@@ -158,6 +162,14 @@ class ItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"kind": "Это преобразование не поддерживается."}
                 )
+        selected_plans = [field for field in ["planned_day", "planned_week", "planned_month", "planned_quarter"] if field in data]
+        if len(selected_plans) > 1:
+            raise serializers.ValidationError("При создании выбери один период планирования.")
+        if any(field in data for field in ["planned_month", "planned_quarter"]):
+            if self.instance:
+                raise serializers.ValidationError("Для существующего дела используй планирование.")
+            if data.get("kind", "task") == "idea":
+                raise serializers.ValidationError("В план можно выбрать задачу или проект.")
         if "planned_week" in data:
             if self.instance:
                 raise serializers.ValidationError(
@@ -196,6 +208,8 @@ class ItemSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, data):
         resolve_capture = data.pop("resolve_capture", False)
+        month = data.pop("planned_month", None)
+        quarter = data.pop("planned_quarter", None)
         week = data.pop("planned_week", None)
         day = data.pop("planned_day", None)
         section = data.pop("planned_section", "")
@@ -210,6 +224,10 @@ class ItemSerializer(serializers.ModelSerializer):
             from .domain import assign
 
             assign(item, "week", week)
+        for period, selected_date in [("month", month), ("quarter", quarter)]:
+            if selected_date is not None:
+                from .domain import assign
+                assign(item, period, selected_date)
         if resolve_capture:
             item.capture.status = "processed"
             item.capture.save(update_fields=["status"])

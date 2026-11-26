@@ -39,7 +39,7 @@ class StateCommand(s.Serializer):
 
 
 class PlanCommand(s.Serializer):
-    period = s.ChoiceField(choices=["day", "week"])
+    period = s.ChoiceField(choices=["day", "week", "month", "quarter"])
     date = s.DateField()
     section = s.CharField(required=False, allow_blank=True)
 

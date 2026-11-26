@@ -82,7 +82,7 @@ class Item(Owned):
 class PlanEntry(Owned):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="entries")
     period = models.CharField(
-        max_length=8, choices=[("day", "День"), ("week", "Неделя")]
+        max_length=8, choices=[("day", "День"), ("week", "Неделя"), ("month", "Месяц"), ("quarter", "Квартал")]
     )
     date = models.DateField()
     active = models.BooleanField(default=True)
@@ -188,3 +188,82 @@ class DaySettings(Owned):
         constraints = [
             models.UniqueConstraint(fields=["owner"], name="one_day_settings_per_owner")
         ]
+
+
+class Habit(Owned):
+    """Stable identity; effective definitions live in HabitVersion."""
+
+
+class HabitVersion(Owned):
+    habit = models.ForeignKey(Habit, on_delete=models.CASCADE, related_name="versions")
+    effective_from = models.DateField()
+    title = models.CharField(max_length=500)
+    areas = models.ManyToManyField(Area, blank=True)
+    section = models.CharField(max_length=160, blank=True)
+    archived = models.BooleanField(default=False)
+    start_date = models.DateField()
+    mode = models.CharField(max_length=16, choices=[
+        ("weekdays", "Дни недели"), ("interval", "Каждые N дней"),
+        ("monthdays", "Числа месяца"), ("after", "После выполнения"),
+    ])
+    interval = models.PositiveIntegerField(default=1)
+    weekdays = models.JSONField(default=list)
+    monthdays = models.JSONField(default=list)
+    last_day = models.BooleanField(default=False)
+    target = models.PositiveIntegerField(default=1)
+    counter_period = models.CharField(max_length=8, choices=[
+        ("day", "День"), ("week", "Неделя"), ("month", "Месяц"),
+    ], default="day")
+
+    class Meta:
+        ordering = ["effective_from", "created_at"]
+        constraints = [models.UniqueConstraint(fields=["habit", "effective_from"], name="habit_version_date")]
+
+
+class HabitPause(Owned):
+    habit = models.ForeignKey(Habit, on_delete=models.CASCADE, related_name="pauses")
+    start = models.DateField()
+    end = models.DateField()
+    cancelled = models.BooleanField(default=False)
+
+
+class HabitLog(Owned):
+    habit = models.ForeignKey(Habit, on_delete=models.CASCADE, related_name="logs")
+    date = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+    state = models.CharField(max_length=16, choices=[
+        ("recorded", "Записано"), ("skipped", "Пропущено"), ("unrecorded", "Нет записи"),
+    ], default="recorded")
+    section = models.CharField(max_length=160, null=True, blank=True)
+    note = models.TextField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["habit", "date"], name="habit_log_date")]
+        ordering = ["date"]
+
+
+class HabitLogRevision(Owned):
+    log = models.ForeignKey(HabitLog, on_delete=models.CASCADE, related_name="revisions")
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict)
+
+
+class ReflectionTemplate(Owned):
+    period = models.CharField(max_length=8, choices=[(p, p) for p in ["day", "week", "month", "quarter", "year"]])
+    body = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["owner", "period"], name="reflection_template_period")]
+
+
+class Reflection(Owned):
+    period = models.CharField(max_length=8, choices=ReflectionTemplate._meta.get_field("period").choices)
+    date = models.DateField()
+    template_snapshot = models.TextField(blank=True)
+    body = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["owner", "period", "date"], name="reflection_period_date")]

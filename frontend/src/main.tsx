@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   QueryClient,
@@ -10,7 +10,6 @@ import {
   Inbox,
   CalendarDays,
   CalendarRange,
-  CalendarMinus,
   FolderOpen,
   Lightbulb,
   Archive,
@@ -21,9 +20,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  Clock3,
-  MoreHorizontal,
   LogOut,
   Leaf,
   RefreshCw,
@@ -31,13 +27,41 @@ import {
   Download,
   Pencil,
   History,
-  CornerDownRight,
+  RotateCcw,
+  ListPlus,
+  Menu,
+  FilePlus2,
+  ArrowRight,
 } from "lucide-react";
 import "./styles.css";
-import { eventsForArea } from "./calendar-areas";
-import { groupWeeklyRows, omitWeeklyProjects, type WeeklyNode } from "./weekly-tree";
+import { TaskRow, preciseSchedule, type TaskRowContext } from "./task-row";
+import { fmt } from "./workspace-ui";
+import {
+  DatePicker,
+  ActionMenu,
+  DialogSurface,
+  Disclosure,
+  IconButton,
+} from "./ui";
+import {
+  HabitDayRows,
+  HabitWeek,
+  HabitManager,
+  type HabitBoard,
+} from "./habits";
+import {
+  ReflectionEditor,
+  ReflectionPage,
+  ReflectionTemplates,
+} from "./reflections";
+import { PlanningPanel, LargePeriodToolbar } from "./period-plans";
+import {
+  groupWeeklyRows,
+  omitWeeklyProjects,
+  type WeeklyNode,
+} from "./weekly-tree";
 
-type Item = {
+export type Item = {
   id: string;
   title: string;
   kind: "task" | "project" | "idea";
@@ -56,20 +80,20 @@ type Item = {
   title_changed_at: string;
   completed_at: string | null;
   has_week_commitment: boolean;
-  schedule: { period: "day" | "week"; date: string; inherited: boolean }[];
+  schedule: {
+    period: "day" | "week" | "month" | "quarter";
+    date: string;
+    inherited: boolean;
+  }[];
   stale: boolean;
   no_next_step: boolean;
-};
-const preciseSchedule = (schedule: Item["schedule"]) => {
-  const days = schedule.filter((plan) => plan.period === "day");
-  return days.length ? days : schedule;
 };
 
 const compareCompletion = (a: Item, b: Item) =>
   Number(a.status === "done") - Number(b.status === "done");
 
 type Capture = { id: string; text: string; status: string; results: string[] };
-type Entry = {
+export type Entry = {
   id: string;
   item: string;
   item_detail: Item;
@@ -101,7 +125,7 @@ type CalEvent = {
   url: string;
   calendar_id: string;
 };
-type Board = {
+export type Board = {
   today: string;
   week: string;
   areas: { id: number; name: string; color: string }[];
@@ -146,16 +170,12 @@ async function api<T = any>(
         : Object.entries(data)
             .map(
               ([k, v]) =>
-                `${k === "reason" ? "Причина" : k}: ${Array.isArray(v) ? v.join(", ") : v}`,
+                `${({ reason: "Причина", title: "Название дела", section: "Секция", deadline: "Дедлайн", non_field_errors: "Ошибка" } as Record<string, string>)[k] || k}: ${Array.isArray(v) ? v.join(", ") : v}`,
             )
             .join("\n"),
     );
   return data;
 }
-const fmt = (
-  date: string,
-  options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" },
-) => new Date(date + "T12:00:00").toLocaleDateString("ru-RU", options);
 const addDays = (value: string, n: number) => {
   const d = new Date(value + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
@@ -196,7 +216,7 @@ function App() {
         <Leaf /> Собираем пространство…
       </div>
     );
-  if (query.isError)
+  if (query.isError && !query.data)
     return (
       <div className="loading">
         Не удалось связаться с сервером.{" "}
@@ -231,15 +251,11 @@ function Login({ onDone }: { onDone: () => void }) {
       >
         <div className="brand">
           <span className="brand-icon">
-            <Leaf size={23} />
+            <Leaf size={20} />
           </span>
           опора<span className="brand-dot">.</span>
         </div>
-        <h1>
-          Место для твоих дел.
-          <br />И место для жизни.
-        </h1>
-        <p>Войди в своё пространство планирования.</p>
+        <h1>Войти в Опору</h1>
         <label>
           Имя пользователя
           <input
@@ -268,20 +284,22 @@ function Login({ onDone }: { onDone: () => void }) {
           {busy ? "Входим…" : "Войти"}
         </button>
       </form>
-      <div className="login-art">
-        <Leaf size={150} strokeWidth={0.6} />
-        <blockquote>
-          Достаточно одного
-          <br />
-          следующего шага.
-        </blockquote>
-      </div>
     </div>
   );
 }
 
 type Page =
-  "inbox" | "day" | "week" | "projects" | "ideas" | "graveyard" | "settings";
+  | "inbox"
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "habits"
+  | "reflections"
+  | "projects"
+  | "ideas"
+  | "graveyard"
+  | "settings";
 function Workspace({ session }: { session: any }) {
   const client = useQueryClient();
   const [page, setPage] = useState<Page>("day"),
@@ -290,6 +308,29 @@ function Workspace({ session }: { session: any }) {
     [area, setArea] = useState<number | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const contexts = useRef<
+    Partial<
+      Record<Page, { search: string; area: number | null; scroll: number }>
+    >
+  >({});
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [picker, setPicker] = useState<"day" | "week" | null>(null);
+  const [undo, setUndo] = useState<(() => Promise<void>) | null>(null);
+  function navigate(next: Page) {
+    contexts.current[page] = { search, area, scroll: window.scrollY };
+    setSearch(contexts.current[next]?.search || "");
+    setArea(contexts.current[next]?.area || null);
+    setPage(next);
+    setFiltersOpen(false);
+    setMoreOpen(false);
+  }
+  useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      window.scrollTo({ top: contexts.current[page]?.scroll || 0 }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [page]);
   const [editor, setEditor] = useState<{
       item?: Item;
       parent?: string;
@@ -297,6 +338,7 @@ function Workspace({ session }: { session: any }) {
       kind?: Item["kind"];
       plannedDay?: string;
       plannedWeek?: string;
+      proposal?: { period: "month" | "quarter"; date: string };
       areas?: number[];
       plannedSection?: string;
     } | null>(null),
@@ -323,6 +365,12 @@ function Workspace({ session }: { session: any }) {
     queryFn: () => api("board/?date=" + date),
     refetchInterval: 60000,
   });
+  const habitsQuery = useQuery<HabitBoard>({
+    queryKey: ["habit-board", date],
+    queryFn: () => api("habit-board/?date=" + date),
+    refetchInterval: 60000,
+  });
+  const habits = habitsQuery.data?.habits || [];
   const b = query.data;
   async function mutate(path: string, body?: unknown, method = "POST") {
     setError("");
@@ -331,6 +379,7 @@ function Workspace({ session }: { session: any }) {
       const r = await api(path, method, body);
       await client.invalidateQueries({ queryKey: ["board"] });
       await client.invalidateQueries({ queryKey: ["history"] });
+      await client.invalidateQueries({ queryKey: ["planning"] });
       return r;
     } catch (e) {
       setError((e as Error).message);
@@ -339,9 +388,32 @@ function Workspace({ session }: { session: any }) {
       setBusy(false);
     }
   }
-  function notify(text: string) {
+  const noticeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+  function notify(text: string, onUndo?: () => Promise<void>) {
+    setUndo(onUndo ? () => onUndo : null);
     setNotice(text);
-    window.setTimeout(() => setNotice(""), 3500);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => {
+      setNotice("");
+      setUndo(null);
+    }, 7000);
+  }
+  useEffect(() => {
+    const handler = (e: Event) => notify((e as CustomEvent<string>).detail);
+    window.addEventListener("opora:notice", handler);
+    return () => window.removeEventListener("opora:notice", handler);
+  }, []);
+  async function signOut() {
+    try {
+      await api("logout/", "POST");
+      client.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "session",
+      });
+      client.setQueryData(["session"], { ...session, authenticated: false });
+    } catch (error) {
+      setError((error as Error).message);
+    }
   }
   function openSchedule(item: Item) {
     setSchedule(item);
@@ -353,6 +425,26 @@ function Workspace({ session }: { session: any }) {
     return item.has_week_commitment;
   }
   function askState(item: Item, status: string) {
+    if (
+      item.kind !== "project" &&
+      (status !== "graveyard" || !explicitWeek(item))
+    ) {
+      void mutate(`items/${item.id}/state/`, { status })
+        .then(() =>
+          notify(
+            status === "done"
+              ? "Дело выполнено"
+              : status === "open"
+                ? "Дело восстановлено"
+                : "Дело отпущено",
+            async () => {
+              await mutate(`items/${item.id}/state/`, { status: item.status });
+            },
+          ),
+        )
+        .catch(() => {});
+      return;
+    }
     setReason("");
     setResult(item.result_comment || "");
     if (item.kind === "project" && status !== "open") {
@@ -371,8 +463,10 @@ function Workspace({ session }: { session: any }) {
         status === "done"
           ? "Завершить дело"
           : status === "graveyard"
-            ? "Не буду делать"
-            : "Вернуть в работу",
+            ? "Отпустить дело"
+            : item.status === "graveyard"
+              ? "Восстановить проект"
+              : "Открыть проект повторно",
       reason: status === "graveyard" && !!explicitWeek(item),
     });
   }
@@ -380,7 +474,7 @@ function Workspace({ session }: { session: any }) {
     setReason("");
     setDecision({
       entry: id,
-      title: "Убрать из плана",
+      title: page === "week" ? "Снять с недели" : "Снять с дня",
       reason: page === "week" && !!b && b.week <= b.today,
     });
   }
@@ -396,318 +490,134 @@ function Workspace({ session }: { session: any }) {
     );
   }
   const nav: [Page, string, React.ReactNode][] = [
-    ["inbox", "Входящие", <Inbox size={19} />],
-    ["day", "Мой день", <CalendarDays size={19} />],
-    ["week", "Моя неделя", <CalendarRange size={19} />],
-    ["projects", "Проекты", <FolderOpen size={19} />],
-    ["ideas", "Идеи", <Lightbulb size={19} />],
-    ["graveyard", "Кладбище", <Archive size={19} />],
+    ["inbox", "Входящие", <Inbox size={20} />],
+    ["day", "День", <CalendarDays size={20} />],
+    ["week", "Неделя", <CalendarRange size={20} />],
+    ["month", "Месяц", <CalendarRange size={20} />],
+    ["quarter", "Квартал", <CalendarRange size={20} />],
+    ["habits", "Привычки", <RefreshCw size={20} />],
+    ["reflections", "Рефлексия", <Pencil size={20} />],
+    ["projects", "Проекты", <FolderOpen size={20} />],
+    ["ideas", "Идеи", <Lightbulb size={20} />],
+    ["graveyard", "Отпущенные дела", <Archive size={20} />],
   ];
-  const titles = {
-    inbox: "Освободи голову",
-    day: "Мой день",
-    week: "Моя неделя",
-    projects: "Большое — по шагам",
-    ideas: "Пусть пока побудет идеей",
-    graveyard: "То, что можно отпустить",
+  const titles: Record<Page, string> = {
+    inbox: "Входящие",
+    day: "День",
+    week: "Неделя",
+    month: "Месяц",
+    quarter: "Квартал",
+    habits: "Привычки",
+    reflections: "Рефлексия",
+    projects: "Проекты",
+    ideas: "Идеи",
+    graveyard: "Отпущенные дела",
     settings: "Настройки",
   };
-  const subtitles = {
-    inbox: "Сначала записать. Решить можно позже.",
-    day: "План — опора. День может сложиться по-своему.",
-    week: "С субботы до вечера пятницы. Выбери главное и оставь место для жизни.",
-    projects: "Результаты, к которым ты движешься.",
-    ideas: "Возможности без обязательств.",
-    graveyard: "Решение не делать — тоже решение.",
-    settings: "Твоё пространство и календарь.",
-  };
-  function ItemRow({
-    item,
-    entry,
-    inherited = false,
-    direct = false,
-    compact = false,
-    hideAreas = false,
-    hideParent = false,
-    scheduledDay,
-    commitmentEntryId,
-    contextOnly = false,
-  }: {
-    item: Item;
-    entry?: Entry;
-    inherited?: boolean;
-    direct?: boolean;
-    compact?: boolean;
-    hideAreas?: boolean;
-    hideParent?: boolean;
-    scheduledDay?: string | null;
-    commitmentEntryId?: string | null;
-    contextOnly?: boolean;
-  }) {
-    const [menu, setMenu] = useState(false);
-    const checked = !contextOnly && (entry ? entry.checked : item.status === "done");
-    const historical =
-      !!entry &&
-      (!entry.active || entry.outcome === "moved" || entry.date < b!.today);
-    return (
-      <div
-        className={`task-row ${scheduledDay ? "scheduled-task" : ""} ${checked ? "completed" : ""} ${!entry?.active && entry ? "archived-entry" : ""} ${compact ? "compact" : ""}`}
-      >
-        {item.kind === "idea" ? (
-          <Lightbulb className="idea-icon" size={20} />
-        ) : (
-          <button
-            className={`checkbox ${checked ? "checked" : ""}`}
-            aria-label={contextOnly ? "Проект не является обязательством недели" : checked ? "Открыть повторно" : "Отметить выполненным"}
-            title={contextOnly ? "Проект показан для группировки дел и не входит в обязательства недели" : undefined}
-            disabled={busy || historical || contextOnly}
-            onClick={() => askState(item, checked ? "open" : "done")}
-          >
-            {checked && <Check size={13} />}
-          </button>
-        )}
-        <button className="task-content" onClick={() => setDetail(item)}>
-          <span className="task-title">
-            {page === "week" && item.kind === "project" && (
-              <FolderOpen className="week-project-icon" size={15} aria-label="Проект" />
-            )}
-            {item.title}
-          </span>
-          <span className="task-meta">
-            {scheduledDay && page !== "week" && (
-              <span className="scheduled-task-date">
-                <CalendarDays size={12} />
-                {fmt(scheduledDay, { weekday: "short", day: "numeric", month: "short" })}
-              </span>
-            )}
-            {page === "projects" && preciseSchedule(item.schedule).map((plan) => (
-              <span key={`${plan.period}-${plan.date}`}>
-                {plan.period === "day" ? <CalendarDays size={12} /> : <CalendarRange size={12} />}
-                {plan.period === "day"
-                  ? `День: ${fmt(plan.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`
-                  : `Неделя: ${fmt(plan.date)} — ${fmt(addDays(plan.date, 6), { day: "numeric", month: "short", year: "numeric" })}`}
-                {plan.inherited && " · через проект"}
-              </span>
-            ))}
-            {item.kind === "project" && !["week", "projects"].includes(page) && (
-              <span>
-                <FolderOpen size={12} />
-                Проект
-              </span>
-            )}
-            {item.parent && !hideParent && (
-              <span>
-                <CornerDownRight size={12} />
-                {b?.items.find((i) => i.id === item.parent)?.title}
-              </span>
-            )}
-            {!hideAreas && item.areas.map((id) => {
-              const a = b?.areas.find((a) => a.id === id);
-              return a ? (
-                <span key={id} className="area-label">
-                  <i style={{ background: a.color }} />
-                  {a.name}
-                </span>
-              ) : null;
-            })}
-            {item.estimated_minutes && (
-              <span>
-                <Clock3 size={12} />
-                {item.estimated_minutes} мин
-              </span>
-            )}
-            {item.deadline && (
-              <span className={item.deadline < b!.today ? "overdue" : ""}>
-                до {fmt(item.deadline, { day: "numeric", month: "short" })}
-              </span>
-            )}
-            {item.location && <span>{item.location}</span>}
-            {item.stale && <span className="stale">Пора пересмотреть</span>}
-            {item.no_next_step && (
-              <span className="stale">Нет следующих шагов</span>
-            )}
-            {inherited && page !== "week" && <span>В плане через проект</span>}
-            {direct && page !== "week" && <span>Обязательство</span>}
-            {entry?.outcome === "moved" && <span>Перенесено</span>}
-            {entry?.outcome === "released" && <span>Убрано из плана</span>}
-          </span>
-        </button>
-        <div className="row-actions">
-          {commitmentEntryId && item.status === "open" && (
-            <button
-              title="Снять обязательство"
-              aria-label="Снять обязательство"
-              disabled={busy}
-              onClick={() => removeEntry(commitmentEntryId)}
-            >
-              <CalendarMinus size={17} />
-            </button>
-          )}
-          {entry?.active && page === "day" && (
-            <button
-              title="Выше"
-              aria-label="Переместить выше"
-              onClick={() => {
-                const sorted = selectedDayEntries.filter(
-                  (x) => x.section === entry.section,
-                );
-                const index = sorted.findIndex((x) => x.id === entry.id);
-                if (index > 0) {
-                  void (async () => {
-                    for (let k = 0; k < sorted.length; k++) {
-                      const position =
-                        k === index ? index - 1 : k === index - 1 ? index : k;
-                      await mutate(`plans/${sorted[k].id}/organize/`, {
-                        position,
-                      });
-                    }
-                  })().catch(() => {});
-                }
-              }}
-            >
-              <ChevronUp size={12} />
-            </button>
-          )}
-          {item.status === "open" && item.kind !== "idea" && (
-            <button
-              title="Запланировать"
-              aria-label="Запланировать"
-              onClick={() => openSchedule(item)}
-            >
-              <CalendarDays size={17} />
-            </button>
-          )}
-          <div className="menu-wrap">
-            <button
-              aria-label="Действия с делом"
-              onClick={() => setMenu(!menu)}
-            >
-              <MoreHorizontal size={20} />
-            </button>
-            {menu && (
-              <>
-                <div className="menu-dismiss" onClick={() => setMenu(false)} />
-                <div className="dropdown">
-                  <button
-                    onClick={() => {
-                      setEditor({ item });
-                      setMenu(false);
-                    }}
-                  >
-                    <Pencil size={14} />
-                    Изменить
-                  </button>
-                  {item.kind === "project" && (
-                    <button
-                      onClick={() => {
-                        setEditor({ parent: item.id });
-                        setMenu(false);
-                      }}
-                    >
-                      <Plus size={14} />
-                      Добавить шаг
-                    </button>
-                  )}
-                  {item.kind === "project" && item.status === "open" && (
-                    <button
-                      onClick={() => {
-                        setClosure(item);
-                        setMenu(false);
-                      }}
-                    >
-                      Обзор перед закрытием
-                    </button>
-                  )}
-                  {item.status !== "open" && (
-                    <button
-                      onClick={() => {
-                        askState(item, "open");
-                        setMenu(false);
-                      }}
-                    >
-                      Вернуть в работу
-                    </button>
-                  )}
-                  {item.status === "open" && (
-                    <button
-                      onClick={() => {
-                        askState(item, "graveyard");
-                        setMenu(false);
-                      }}
-                    >
-                      Не буду делать
-                    </button>
-                  )}
-                  {entry?.active && item.status === "open" && (
-                    <button
-                      onClick={() => {
-                        removeEntry(entry.id);
-                        setMenu(false);
-                      }}
-                    >
-                      Убрать из плана
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  function createForPage() {
+    setEditor({
+      plannedDay: page === "day" ? date : undefined,
+      plannedWeek: page === "week" ? b?.week : undefined,
+      proposal:
+        page === "month" || page === "quarter"
+          ? { period: page, date }
+          : undefined,
+      kind:
+        page === "projects" ? "project" : page === "ideas" ? "idea" : "task",
+    });
   }
-  function EventList({ events, chronological = false }: { events: CalEvent[]; chronological?: boolean }) {
+  function EventList({
+    events,
+    chronological = false,
+  }: {
+    events: CalEvent[];
+    chronological?: boolean;
+  }) {
     return (
       <div className="events">
-        {[...events].sort((a, b) => chronological
-          ? Number(b.all_day) - Number(a.all_day) || Date.parse(a.start) - Date.parse(b.start)
-          : Number(a.done) - Number(b.done)).map((e) => (
-          <div className={`event-row ${e.done ? "completed" : ""}`} key={e.id}>
-            <span className="event-time">
-              {e.all_day ? "Весь день" : timeFmt(e.start)}
-              {!e.all_day && <small>{timeFmt(e.end)}</small>}
-            </span>
-            <span className="event-line" />
-            <button
-              className={`checkbox ${e.done ? "checked" : ""}`}
-              aria-label={"Отметить встречу " + e.title}
-              disabled={busy}
-              onClick={() =>
-                void mutate(`events/${e.id}/check/`, { done: !e.done }).catch(
-                  () => {},
-                )
-              }
+        {[...events]
+          .sort((a, b) =>
+            chronological
+              ? Number(b.all_day) - Number(a.all_day) ||
+                Date.parse(a.start) - Date.parse(b.start)
+              : Number(a.done) - Number(b.done),
+          )
+          .map((e) => (
+            <div
+              className={`event-row ${e.done ? "completed" : ""}`}
+              key={e.id}
             >
-              {e.done && <Check size={13} />}
-            </button>
-            <span className="task-title">{e.title}</span>
-            {e.url && (
-              <a
-                href={e.url}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Открыть событие Google"
+              <span className="event-time">
+                {e.all_day ? "Весь день" : timeFmt(e.start)}
+                {!e.all_day && <small>{timeFmt(e.end)}</small>}
+              </span>
+              <span className="event-line" />
+              <button
+                className={`checkbox ${e.done ? "checked" : ""}`}
+                role="checkbox"
+                aria-checked={e.done}
+                aria-label={
+                  (e.done
+                    ? "Снять локальную отметку встречи: "
+                    : "Отметить встречу локально: ") + e.title
+                }
+                disabled={busy}
+                onClick={() =>
+                  void mutate(`events/${e.id}/check/`, { done: !e.done }).catch(
+                    () => {},
+                  )
+                }
               >
-                <ExternalLink size={15} />
-              </a>
-            )}
-          </div>
-        ))}
+                <span>{e.done && <Check size={16} />}</span>
+              </button>
+              <span className="task-title">{e.title}</span>
+              {e.url && (
+                <a
+                  href={e.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Открыть событие Google"
+                >
+                  <ExternalLink size={16} />
+                </a>
+              )}
+            </div>
+          ))}
       </div>
     );
   }
   function Empty({ title, text }: { title: string; text: string }) {
     return (
       <div className="empty">
-        <Leaf size={34} strokeWidth={1.1} />
         <h3>{title}</h3>
         <p>{text}</p>
+        {(search || area) && (
+          <button
+            className="text-button"
+            onClick={() => {
+              setSearch("");
+              setArea(null);
+            }}
+          >
+            Сбросить фильтры
+          </button>
+        )}
       </div>
     );
   }
   const captureOpen = b?.captures.filter((c) => c.status === "open") || [];
+  const captureVisible = captureOpen.filter(
+    (c) =>
+      !search ||
+      c.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+  );
+  const inboxVisible = (b?.inbox_ids || [])
+    .map((id) => b!.items.find((i) => i.id === id)!)
+    .filter(match)
+    .sort(compareCompletion);
   const selectedDayEntries =
-    b?.day_entries.filter((e) => match(e.item_detail))
+    b?.day_entries
+      .filter((e) => match(e.item_detail))
       .sort((a, b) => Number(a.checked) - Number(b.checked)) || [];
   const dayDone = selectedDayEntries.filter((e) => e.checked).length;
   const dayWeekPool = (b?.week_rows || []).filter(
@@ -722,15 +632,25 @@ function Workspace({ session }: { session: any }) {
       match(r.item),
   );
   const weekActive =
-    b?.week_rows.filter((r) => r.active && match(r.item))
+    b?.week_rows
+      .filter((r) => r.active && match(r.item))
       .sort((a, b) => compareCompletion(a.item, b.item)) || [];
   const weekDone = weekActive.filter((r) => r.item.status === "done").length;
-  const weekDayTasks = (b?.items || []).filter((item) =>
-    item.kind === "task" && item.status !== "graveyard" && match(item) &&
-    !weekActive.some((row) => row.item.id === item.id) &&
-    item.schedule.some((entry) => entry.period === "day" &&
-      entry.date >= b!.week && entry.date < addDays(b!.week, 7)),
-  ).sort(compareCompletion);
+  const weekDayTasks = (b?.items || [])
+    .filter(
+      (item) =>
+        item.kind === "task" &&
+        item.status !== "graveyard" &&
+        match(item) &&
+        !weekActive.some((row) => row.item.id === item.id) &&
+        item.schedule.some(
+          (entry) =>
+            entry.period === "day" &&
+            entry.date >= b!.week &&
+            entry.date < addDays(b!.week, 7),
+        ),
+    )
+    .sort(compareCompletion);
 
   const weekSections = [
     ...(b?.areas || []).map((a) => ({
@@ -738,7 +658,7 @@ function Workspace({ session }: { session: any }) {
       name: a.name,
       color: a.color,
       rows: weekActive.filter((r) => r.item.areas.includes(a.id)),
-      events: eventsForArea(a.name, b?.google.calendars || [], b?.events || []),
+      events: [] as CalEvent[],
     })),
     {
       id: "unassigned",
@@ -747,34 +667,71 @@ function Workspace({ session }: { session: any }) {
       color: "#95a395",
       rows: weekActive.filter((r) => r.item.areas.length === 0),
     },
-  ].sort((a, b) => a.name.localeCompare(b.name, "ru") || a.id.localeCompare(b.id));
-  function belongsToArea(item: Item, sectionId: string) {
-    return sectionId === "unassigned" ? item.areas.length === 0 : item.areas.includes(Number(sectionId));
+  ].sort(
+    (a, b) => a.name.localeCompare(b.name, "ru") || a.id.localeCompare(b.id),
+  );
+  function branchMatches(item: Item, visited = new Set<string>()): boolean {
+    if (visited.has(item.id)) return false;
+    visited.add(item.id);
+    return (
+      match(item) ||
+      !!b?.items.some(
+        (child) =>
+          child.parent === item.id &&
+          child.status !== "graveyard" &&
+          branchMatches(child, visited),
+      )
+    );
   }
-  function renderAreaHeading(section: typeof weekSections[number], kind: "project" | "idea", count: number) {
+  function belongsToArea(item: Item, sectionId: string) {
+    return sectionId === "unassigned"
+      ? item.areas.length === 0
+      : item.areas.includes(Number(sectionId));
+  }
+  function renderAreaHeading(
+    section: (typeof weekSections)[number],
+    kind: "project" | "idea",
+    count: number,
+  ) {
     const label = kind === "project" ? "Добавить проект" : "Добавить идею";
     return (
       <div className="card-heading week-area-heading">
-        <h3><i style={{ background: section.color }} />{section.name}<span>{count}</span></h3>
-        <button className="week-area-add" title={`${label}: ${section.name}`} aria-label={`${label}: ${section.name}`}
-          disabled={busy} onClick={() => setEditor({ kind, areas: section.id === "unassigned" ? [] : [Number(section.id)] })}>
+        <h3>
+          <i style={{ background: section.color }} />
+          {section.name}
+          <span>{count}</span>
+        </h3>
+        <button
+          className="week-area-add"
+          title={`${label}: ${section.name}`}
+          aria-label={`${label}: ${section.name}`}
+          disabled={busy}
+          onClick={() =>
+            setEditor({
+              kind,
+              areas: section.id === "unassigned" ? [] : [Number(section.id)],
+            })
+          }
+        >
           <Plus size={16} />
         </button>
       </div>
     );
   }
-  function renderWeeklyNode({ row: r, children }: WeeklyNode<WeekRow>, parentId: string | null = null): React.ReactNode {
+  function renderWeeklyNode(
+    { row: r, children }: WeeklyNode<WeekRow>,
+    parentId: string | null = null,
+  ): React.ReactNode {
     return (
       <div className="week-project-group" key={r.item.id}>
-        <ItemRow
+        <TaskRow
+          context={rowContext}
           item={r.item}
-          inherited={r.inherited}
           direct={r.direct}
           hideAreas
           hideParent={r.item.parent === parentId}
           compact
           contextOnly={r.contextOnly}
-          scheduledDay={r.scheduled_day}
           commitmentEntryId={r.direct ? r.entry_id : null}
         />
         {children.length > 0 && (
@@ -782,45 +739,62 @@ function Workspace({ session }: { session: any }) {
             {children.map((child) => renderWeeklyNode(child, r.item.id))}
           </div>
         )}
-        {r.item.kind === "project" && r.item.status === "open" && (
-          <button className="week-project-add" onClick={() => setWeekProject(r.item)}>
-            <Plus size={15} /> Добавить дела
-          </button>
-        )}
       </div>
     );
   }
-  const usedSections = new Set(
-    [
-      ...selectedDayEntries.map((e) => e.section || "Без привязки ко времени"),
-      "Без привязки ко времени",
-    ],
-  );
+  const usedSections = new Set([
+    ...selectedDayEntries.map((e) => e.section || "Без привязки ко времени"),
+    ...habits.flatMap((h) =>
+      h.cells
+        .filter(
+          (c) => c.date === date && (c.expected || c.state !== "unrecorded"),
+        )
+        .map((c) => c.section || "Без привязки ко времени"),
+    ),
+  ]);
   const sections = [
     ...(b?.day_sections || []).filter((name) => usedSections.has(name)),
     ...[...usedSections].filter((name) => !b?.day_sections.includes(name)),
   ];
+  const rowContext: TaskRowContext = {
+    area,
+    page,
+    b: b || { today: session.today, items: [], areas: [] },
+    busy,
+    askState,
+    setDetail: (item) => {
+      if (closure) setClosure(null);
+      setDetail(item);
+    },
+    setEditor,
+    setWeekProject,
+    setClosure,
+    removeEntry,
+    openSchedule,
+    setSchedule,
+    setScheduleDate,
+    setPeriod,
+    setSection,
+    selectedDayEntries,
+    mutate,
+  };
   return (
-    <div className="shell">
+    <div className="shell" data-page={page}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-icon">
-            <Leaf size={22} />
+            <Leaf size={20} />
           </span>
           опора<span className="brand-dot">.</span>
         </div>
-        <div className="workspace-label">МОЁ ПРОСТРАНСТВО</div>
         <nav>
           {nav.map(([key, label, icon]) => (
             <button
               key={key}
               aria-label={label}
               className={page === key ? "active" : ""}
-              onClick={() => {
-                setPage(key);
-                setArea(null);
-                setSearch("");
-              }}
+              aria-current={page === key ? "page" : undefined}
+              onClick={() => navigate(key)}
             >
               {icon}
               <span>{label}</span>
@@ -831,27 +805,14 @@ function Workspace({ session }: { session: any }) {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="gentle-note">
-            <Leaf size={22} />
-            <p>
-              Не всё нужно делать.
-              <br />
-              Не всё нужно сегодня.
-            </p>
-          </div>
           <button
             className={`settings-link ${page === "settings" ? "active" : ""}`}
-            onClick={() => setPage("settings")}
+            onClick={() => navigate("settings")}
           >
-            <Settings size={18} />
+            <Settings size={16} />
             Настройки
           </button>
-          <button
-            className="profile"
-            onClick={() =>
-              void api("logout/", "POST").then(() => client.invalidateQueries())
-            }
-          >
+          <button className="profile" onClick={() => void signOut()}>
             <span className="avatar">
               {session.username.slice(0, 1).toUpperCase()}
             </span>
@@ -864,83 +825,90 @@ function Workspace({ session }: { session: any }) {
         </div>
       </aside>
       <main>
-        <header className="topbar">
-          <span>
-            Моё пространство <span className="separator">/</span>{" "}
-            {nav.find((n) => n[0] === page)?.[1] || "Настройки"}
-          </span>
-          <div className="topbar-right">
-            <span className="today-label">
-              {fmt(b?.today || date, {
-                day: "numeric",
-                month: "long",
-                weekday: "short",
-              })}
-            </span>
-            <button
-              aria-label="Настройки"
-              className="top-settings"
-              onClick={() => setPage("settings")}
-            >
-              <Settings size={17} />
-            </button>
-            <button
-              className="primary small"
-              onClick={() => {
-                setPage("inbox");
-                document.getElementById("capture-input")?.focus();
-              }}
-            >
-              <Plus size={16} />
-              Записать мысль
-            </button>
-          </div>
-        </header>
         <div className="main-content">
           <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                {page === "day"
-                  ? "ОДИН ДЕНЬ ЗА РАЗ"
-                  : page === "week"
-                    ? "ВЫБРАТЬ ГЛАВНОЕ"
-                    : "ПРОСТРАНСТВО ДЛЯ ЯСНОСТИ"}
-              </div>
-              <h1>{titles[page]}</h1>
-              <p>{subtitles[page]}</p>
+            <h1 tabIndex={-1}>{titles[page]}</h1>
+            <div className="page-actions">
+              {!["settings", "habits", "reflections"].includes(page) && (
+                <IconButton
+                  className="filter-toggle"
+                  label="Поиск и фильтры"
+                  aria-expanded={filtersOpen || !!search || !!area}
+                  aria-controls="workspace-filters"
+                  onClick={() => setFiltersOpen(!filtersOpen)}
+                >
+                  <Search size={20} />
+                </IconButton>
+              )}
+              {page !== "inbox" && (
+                <IconButton
+                  label="Записать мысль"
+                  onClick={() => {
+                    navigate("inbox");
+                    requestAnimationFrame(() =>
+                      document.getElementById("capture-input")?.focus(),
+                    );
+                  }}
+                >
+                  <Inbox size={20} />
+                </IconButton>
+              )}
+              {page === "inbox" && (
+                <IconButton
+                  label="Создать дело без входящей мысли"
+                  onClick={createForPage}
+                >
+                  <FilePlus2 size={20} />
+                </IconButton>
+              )}
+              {page === "day" || page === "week" ? (
+                <button className="primary" onClick={() => setPicker(page)}>
+                  <ListPlus size={20} />
+                  {page === "day" ? "Добавить в день" : "Выбрать дела"}
+                </button>
+              ) : (
+                ["projects", "ideas", "month", "quarter"].includes(page) && (
+                  <button className="primary" onClick={createForPage}>
+                    <Plus size={20} />
+                    {page === "projects"
+                      ? "Новый проект"
+                      : page === "ideas"
+                        ? "Сохранить идею"
+                        : "Новое дело"}
+                  </button>
+                )
+              )}
             </div>
-            {page !== "settings" && (
-              <button
-                className="secondary"
-                onClick={() =>
-                  setEditor({
-                    plannedDay: page === "day" ? date : undefined,
-                    plannedWeek: page === "week" ? b?.week : undefined,
-                    kind:
-                      page === "projects"
-                        ? "project"
-                        : page === "ideas"
-                          ? "idea"
-                          : "task",
-                  })
-                }
-              >
-                <Plus size={17} />
-                {page === "projects"
-                  ? "Новый проект"
-                  : page === "ideas"
-                    ? "Новая идея"
-                    : "Новое дело"}
-              </button>
-            )}
           </div>
           {notice && (
             <div className="notice" role="status">
-              <Check size={17} />
-              {notice}
+              <Check size={16} />
+              <span>{notice}</span>
+              {undo && (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    void undo()
+                      .then(() => {
+                        setNotice("");
+                        setUndo(null);
+                      })
+                      .catch(() => {});
+                  }}
+                >
+                  <RotateCcw size={16} />
+                  Отменить
+                </button>
+              )}
+              <IconButton
+                label="Закрыть уведомление"
+                onClick={() => setNotice("")}
+              >
+                <X size={16} />
+              </IconButton>
             </div>
           )}
-          {error && (
+          {error && !editor && !picker && !weekProject && (
             <div
               className={`error ${editor || decision || schedule || closure ? "floating-error" : ""}`}
               role="alert"
@@ -954,9 +922,15 @@ function Workspace({ session }: { session: any }) {
               </button>
             </div>
           )}
+          {query.isError && b && (
+            <div className="error" role="status">
+              Нет связи с сервером. Показаны последние загруженные дела.{" "}
+              <button onClick={() => query.refetch()}>Повторить</button>
+            </div>
+          )}
           {query.isPending ? (
             <div className="loading">Загружаем дела…</div>
-          ) : query.isError ? (
+          ) : query.isError && !b ? (
             <div className="error">
               Не удалось загрузить дела.{" "}
               <button onClick={() => query.refetch()}>Повторить</button>
@@ -964,87 +938,96 @@ function Workspace({ session }: { session: any }) {
           ) : (
             b && (
               <>
-                {(page === "day" || page === "week") && (
-                  <div className="period-toolbar">
-                    <div className="date-controls">
-                      <button
-                        aria-label="Предыдущий период"
-                        onClick={() =>
-                          setDate(addDays(date, page === "day" ? -1 : -7))
-                        }
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <strong>
+                <div
+                  className={`workspace-controls ${filtersOpen || search || area ? "filters-open" : ""}`}
+                >
+                  {(page === "day" || page === "week") && (
+                    <div className="period-toolbar">
+                      <div className="date-controls">
+                        <button
+                          aria-label="Предыдущий период"
+                          onClick={() =>
+                            setDate(addDays(date, page === "day" ? -1 : -7))
+                          }
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <strong>
+                          {page === "day"
+                            ? fmt(date, {
+                                weekday: "short",
+                                day: "numeric",
+                                month: "short",
+                              })
+                            : `${fmt(b.week, { day: "numeric", month: "short" })} — ${fmt(addDays(b.week, 6), { day: "numeric", month: "short" })}`}
+                        </strong>
+                        <button
+                          aria-label="Следующий период"
+                          onClick={() =>
+                            setDate(addDays(date, page === "day" ? 1 : 7))
+                          }
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                        <button
+                          className="today-button"
+                          onClick={() => setDate(b.today)}
+                        >
+                          {page === "week" ? "Текущая неделя" : "Сегодня"}
+                        </button>
+                        <DatePicker
+                          date={date}
+                          today={b.today}
+                          onChange={setDate}
+                        />
+                      </div>
+                      <span className="period-hint">
                         {page === "day"
-                          ? fmt(date, {
-                              weekday: "long",
-                              day: "numeric",
-                              month: "long",
-                            })
-                          : `Сб, ${fmt(b.week)} — Пт, ${fmt(addDays(b.week, 6))}, вечер`}
-                      </strong>
-                      <button
-                        aria-label="Следующий период"
-                        onClick={() =>
-                          setDate(addDays(date, page === "day" ? 1 : 7))
-                        }
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                      <button
-                        className="today-button"
-                        onClick={() => setDate(b.today)}
-                      >
-                        {page === "week" ? "Текущая неделя" : "Сегодня"}
-                      </button>
-                      <input
-                        aria-label="Выбрать дату"
-                        type="date"
-                        value={date}
-                        onChange={(e) =>
-                          e.target.value && setDate(e.target.value)
-                        }
-                      />
+                          ? "День с 05:00"
+                          : "Суббота — пятница · обязательства"}
+                      </span>
                     </div>
-                    <span className="period-hint">
-                      {page === "day"
-                        ? "Гибкий план дня"
-                        : "Обязательства недели"}
-                    </span>
-                  </div>
-                )}
-                {page !== "settings" && (
-                  <div className="filterbar">
-                    <label className="search">
-                      <Search size={16} />
-                      <input
-                        aria-label="Поиск по делам"
-                        placeholder="Найти дело, тег или место"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                      />
-                    </label>
-                    {page !== "day" && (
-                      <select
-                        aria-label="Сфера жизни"
-                        value={area || ""}
-                        onChange={(e) =>
-                          setArea(
-                            e.target.value ? Number(e.target.value) : null,
-                          )
-                        }
-                      >
-                        <option value="">Все сферы жизни</option>
-                        {b.areas.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {(page === "month" || page === "quarter") && (
+                    <LargePeriodToolbar
+                      period={page}
+                      date={date}
+                      today={b.today}
+                      setDate={setDate}
+                    />
+                  )}
+                  {!["settings", "habits", "reflections"].includes(page) && (
+                    <div className="filterbar" id="workspace-filters">
+                      <label className="search">
+                        <Search size={16} />
+                        <input
+                          aria-label="Поиск по делам"
+                          placeholder="Найти дело, тег или место"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                        />
+                      </label>
+                      {page !== "day" && (
+                        <select
+                          aria-label="Сфера жизни"
+                          value={area || ""}
+                          onChange={(e) =>
+                            setArea(
+                              e.target.value ? Number(e.target.value) : null,
+                            )
+                          }
+                        >
+                          <option value="">Все сферы жизни</option>
+                          {b.areas.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {page === "inbox" && (
                   <>
                     <form
@@ -1059,7 +1042,10 @@ function Workspace({ session }: { session: any }) {
                         } catch {}
                       }}
                     >
-                      <Plus size={21} />
+                      <Plus size={20} />
+                      <label className="v2-sr-only" htmlFor="capture-input">
+                        Новая мысль
+                      </label>
                       <input
                         id="capture-input"
                         placeholder="Что сейчас в голове? Просто запиши…"
@@ -1070,347 +1056,517 @@ function Workspace({ session }: { session: any }) {
                         className="primary"
                         disabled={busy || !quick.trim()}
                       >
-                        Сохранить
+                        <ArrowRight size={20} />
+                        <span className="v2-sr-only">Записать мысль</span>
                       </button>
                     </form>
                     <div className="content-card">
                       <div className="card-heading">
                         <h2>
-                          Неразобранные мысли <span>{captureOpen.length}</span>
+                          Неразобранные мысли{" "}
+                          <span>{captureVisible.length}</span>
                         </h2>
-                        <span>Разбирай в своём темпе</span>
                       </div>
-                      {captureOpen
-                        .filter(
-                          (c) =>
-                            !search ||
-                            c.text.toLowerCase().includes(search.toLowerCase()),
-                        )
-                        .map((c) => (
-                          <div key={c.id} className="capture-row">
-                            <div className="capture-mark" />
-                            <div>
-                              <p>{c.text}</p>
-                              {c.results.length > 0 && (
-                                <small>Создано дел: {c.results.length}</small>
-                              )}
-                              <div className="capture-actions">
-                                <button
-                                  onClick={() => setEditor({ capture: c.id })}
-                                >
-                                  Создать дело
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setEditor({ capture: c.id, kind: "idea" })
-                                  }
-                                >
-                                  В идеи
-                                </button>
-                                <button
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void mutate(`captures/${c.id}/resolve/`, {
-                                      status: "processed",
-                                    }).catch(() => {})
-                                  }
-                                >
-                                  Разобрано
-                                </button>
-                                <button
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void mutate(`captures/${c.id}/resolve/`, {
-                                      status: "graveyard",
-                                    }).catch(() => {})
-                                  }
-                                >
-                                  Не буду делать
-                                </button>
-                              </div>
-                            </div>
+                      {captureVisible.map((c) => (
+                        <div key={c.id} className="capture-row">
+                          <div className="capture-mark" />
+                          <div>
+                            <p>{c.text}</p>
+                            {c.results.length > 0 && (
+                              <small>Создано дел: {c.results.length}</small>
+                            )}
                           </div>
-                        ))}
-                      {!captureOpen.length && (
+                          <div className="capture-actions">
+                            <IconButton
+                              label={`Создать дело из мысли: ${c.text}`}
+                              onClick={() => setEditor({ capture: c.id })}
+                            >
+                              <FilePlus2 size={20} />
+                            </IconButton>
+                            <ActionMenu label={`Действия с мыслью: ${c.text}`}>
+                              <button
+                                onClick={() =>
+                                  setEditor({ capture: c.id, kind: "idea" })
+                                }
+                              >
+                                <Lightbulb size={16} />
+                                Сохранить как идею
+                              </button>
+                              <button
+                                disabled={busy}
+                                onClick={() =>
+                                  void mutate(`captures/${c.id}/resolve/`, {
+                                    status: "processed",
+                                  }).catch(() => {})
+                                }
+                              >
+                                <Check size={16} />
+                                Завершить разбор
+                              </button>
+                              <button
+                                disabled={busy}
+                                onClick={() =>
+                                  void mutate(`captures/${c.id}/resolve/`, {
+                                    status: "graveyard",
+                                  })
+                                    .then(() =>
+                                      notify("Мысль отпущена", async () => {
+                                        await mutate(
+                                          `captures/${c.id}/resolve/`,
+                                          { status: "open" },
+                                        );
+                                      }),
+                                    )
+                                    .catch(() => {})
+                                }
+                              >
+                                <Archive size={16} />
+                                Отпустить мысль
+                              </button>
+                            </ActionMenu>
+                          </div>
+                        </div>
+                      ))}
+                      {!captureVisible.length && (
                         <Empty
-                          title="Можно выдохнуть"
-                          text="Новые мысли сохраняй здесь. Решения — когда будет время."
+                          title={
+                            search
+                              ? "Ничего не найдено"
+                              : "Нет неразобранных мыслей"
+                          }
+                          text={
+                            search
+                              ? "Измени поиск или сбрось фильтры."
+                              : "Запиши новую мысль в поле выше."
+                          }
                         />
                       )}
                     </div>
                     <div className="content-card">
                       <div className="card-heading">
                         <h2>
-                          Дела без плана <span>{b.inbox_ids.length}</span>
+                          Дела без плана <span>{inboxVisible.length}</span>
                         </h2>
-                        <span>Выбери подходящий период</span>
                       </div>
-                      {b.inbox_ids
-                        .map((id) => b.items.find((i) => i.id === id)!)
-                        .filter(match)
-                        .sort(compareCompletion)
-                        .map((i) => (
-                          <ItemRow key={i.id} item={i} />
-                        ))}
-                      {!b.inbox_ids.length && (
+                      {inboxVisible.map((i) => (
+                        <TaskRow context={rowContext} key={i.id} item={i} />
+                      ))}
+                      {!inboxVisible.length && (
                         <div className="inline-empty">
-                          Все актуальные дела распределены.
+                          {search || area
+                            ? "Ничего не найдено"
+                            : "Нет дел без плана"}
                         </div>
                       )}
                     </div>
                   </>
                 )}
+                {["day", "week", "habits"].includes(page) &&
+                  habitsQuery.isError && (
+                    <div className="error" role="alert">
+                      Не удалось загрузить привычки.{" "}
+                      <button onClick={() => habitsQuery.refetch()}>
+                        Повторить
+                      </button>
+                    </div>
+                  )}
+                {(page === "month" || page === "quarter") && (
+                  <>
+                    <PlanningPanel
+                      api={api}
+                      period={page}
+                      date={date}
+                      today={b.today}
+                      items={b.items}
+                      area={area}
+                      search={search}
+                      onOpen={(id) =>
+                        setDetail(b.items.find((i) => i.id === id) || null)
+                      }
+                    />
+                    <ReflectionEditor
+                      key={`${page}-${date}`}
+                      api={api}
+                      period={page}
+                      date={date}
+                      compact
+                    />
+                  </>
+                )}
+                {page === "habits" && (
+                  <HabitManager
+                    today={b.today}
+                    areas={b.areas}
+                    sections={b.day_sections}
+                    api={api}
+                  />
+                )}
+                {page === "reflections" && (
+                  <ReflectionPage api={api} today={b.today} />
+                )}
                 {page === "day" && (
-                  <div className="day-layout">
-                    <div>
-                      {!sections.includes("Календарные встречи") && (
-                        <div className="content-card">
-                          <div className="card-heading">
-                            <div className="schedule-heading">
-                              {b.google.connected && (
-                                <button
-                                  className="calendar-refresh"
-                                  disabled={busy}
-                                  title="Обновить календарь"
-                                  aria-label="Обновить календарь"
-                                  onClick={() =>
-                                    void mutate("google/sync/")
-                                      .then(() =>
-                                        notify("Расписание обновлено"),
-                                      )
-                                      .catch(() => {})
-                                  }
-                                >
-                                  <RefreshCw size={15} />
-                                </button>
-                              )}
-                              <h2>Расписание</h2>
-                            </div>
-                            <span className="source-label">
-                              Google Календарь
-                            </span>
-                          </div>
-                          <EventList
-                            events={b.events.filter((e) => eventInDay(e, date))}
-                          />
-                          {!b.events.some((e) => eventInDay(e, date)) && (
-                            <div className="inline-empty">
-                              {b.google.connected
-                                ? "В календаре нет встреч на этот день."
-                                : "Подключи календарь в настройках, чтобы видеть встречи."}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <div className="content-card">
+                  <div
+                    className={`day-layout ${!dayWeekPool.length && !b.events.some((e) => eventInDay(e, date)) ? "single-column" : ""}`}
+                  >
+                    <div className="day-main">
+                      <div
+                        className="content-card task-list"
+                        aria-label="План дня"
+                      >
                         <div className="card-heading">
                           <h2>
-                            Дела на день{" "}
-                            <span>{selectedDayEntries.length}</span>
+                            Дела <span>{selectedDayEntries.length}</span>
                           </h2>
-                          <span>{dayDone} выполнено</span>
+                          {!!selectedDayEntries.length && (
+                            <span>
+                              {dayDone}/{selectedDayEntries.length} выполнено
+                            </span>
+                          )}
                         </div>
-                        {sections.map((s) => (
-                          <section key={s} className="day-section">
-                            <div className="day-section-heading">
-                              <h3>{s}</h3>
-                              <button
-                                className="text-button"
-                                aria-label={`Добавить задачу в секцию ${s}`}
-                                onClick={() =>
-                                  setEditor({
-                                    kind: "task",
-                                    plannedDay: date,
-                                    plannedSection:
-                                      s === "Без привязки ко времени" ? "" : s,
-                                  })
-                                }
-                              >
-                                <Plus size={14} />
-                                Добавить задачу
-                              </button>
-                            </div>
-                            {s === "Календарные встречи" && (
-                              <EventList
-                                events={b.events.filter((e) =>
-                                  eventInDay(e, date),
-                                )}
-                              />
+                        {sections.map((sectionName) => (
+                          <section key={sectionName} className="day-section">
+                            {(sectionName !== "Без привязки ко времени" ||
+                              sections.length > 1) && (
+                              <div className="day-section-heading">
+                                <h3>{sectionName}</h3>
+                                <IconButton
+                                  label={`Добавить задачу в секцию ${sectionName}`}
+                                  onClick={() =>
+                                    setEditor({
+                                      kind: "task",
+                                      plannedDay: date,
+                                      plannedSection:
+                                        sectionName ===
+                                        "Без привязки ко времени"
+                                          ? ""
+                                          : sectionName,
+                                    })
+                                  }
+                                >
+                                  <Plus size={20} />
+                                </IconButton>
+                              </div>
                             )}
                             {selectedDayEntries
                               .filter(
                                 (e) =>
                                   (e.section || "Без привязки ко времени") ===
-                                  s,
+                                  sectionName,
                               )
                               .map((e) => (
-                                <div key={e.id}>
-                                  <ItemRow item={e.item_detail} entry={e} hideAreas compact />
-                                </div>
+                                <TaskRow
+                                  context={rowContext}
+                                  key={e.id}
+                                  item={e.item_detail}
+                                  entry={e}
+                                  compact
+                                  hideAreas
+                                />
                               ))}
+                            <HabitDayRows
+                              habits={habits}
+                              date={date}
+                              today={b.today}
+                              section={sectionName}
+                              sections={b.day_sections}
+                              area={area}
+                              search={search}
+                              api={api}
+                            />
                           </section>
                         ))}
-                        {!selectedDayEntries.length && (
-                          <Empty
-                            title="Начни с одного шага"
-                            text="Выбери дело из недели или входящих и добавь его на сегодня."
-                          />
-                        )}
+                        {!selectedDayEntries.length &&
+                          !habits.some((h) =>
+                            h.cells.some(
+                              (c) =>
+                                c.date === date &&
+                                (c.expected || c.state !== "unrecorded") &&
+                                c.title
+                                  .toLocaleLowerCase()
+                                  .includes(search.toLocaleLowerCase()),
+                            ),
+                          ) && (
+                            <div className="empty">
+                              <h3>
+                                {search
+                                  ? "Ничего не найдено"
+                                  : "Нет задач на этот день"}
+                              </h3>
+                              <button
+                                className="text-button"
+                                onClick={() =>
+                                  search ? setSearch("") : setPicker("day")
+                                }
+                              >
+                                {search
+                                  ? "Сбросить поиск"
+                                  : "Добавить дело в день"}
+                              </button>
+                            </div>
+                          )}
                       </div>
+                      <ReflectionEditor
+                        key={`day-${date}`}
+                        api={api}
+                        period="day"
+                        date={date}
+                        compact
+                      />
                     </div>
-                    <aside className="day-aside">
-                      <div className="progress-card">
-                        <span className="eyebrow">В ТВОЁМ ТЕМПЕ</span>
-                        <h3>
-                          {dayDone} <span>из {selectedDayEntries.length}</span>
-                        </h3>
-                        <p>дел выполнено</p>
-                        <div className="progress-track">
-                          <i
-                            style={{
-                              width: `${selectedDayEntries.length ? (dayDone / selectedDayEntries.length) * 100 : 0}%`,
-                            }}
-                          />
-                        </div>
-                        <small>
-                          Достаточно делать то, что сейчас посильно.
-                        </small>
-                      </div>
-                      <div className="content-card week-pool">
-                        <div className="card-heading">
-                          <h2>Из плана недели</h2>
-                        </div>
-                        <p className="aside-description">
-                          Открытые шаги без выбранного дня
-                        </p>
-                        {dayWeekPool.map((r) => (
-                            <button
-                              key={r.item.id}
-                              className="pool-item"
-                              onClick={() => openSchedule(r.item)}
-                            >
-                              <Plus size={15} />
-                              <span>{r.item.title}</span>
-                            </button>
-                          ))}
-                        {!dayWeekPool.length && (
-                          <div className="inline-empty">
-                            Нет дел без выбранного дня.
+                    {(dayWeekPool.length > 0 ||
+                      b.events.some((e) => eventInDay(e, date))) && (
+                      <aside className="day-aside">
+                        {!!dayWeekPool.length && (
+                          <div className="content-card week-pool">
+                            <div className="card-heading">
+                              <h2>
+                                Из недели <span>{dayWeekPool.length}</span>
+                              </h2>
+                            </div>
+                            {[
+                              ...new Set(dayWeekPool.map((r) => r.item.parent)),
+                            ].map((parentId) => (
+                              <section
+                                key={parentId || "standalone"}
+                                className="pool-group"
+                              >
+                                {parentId && (
+                                  <h3>
+                                    {
+                                      b.items.find((i) => i.id === parentId)
+                                        ?.title
+                                    }
+                                  </h3>
+                                )}
+                                {dayWeekPool
+                                  .filter((r) => r.item.parent === parentId)
+                                  .map((r) => (
+                                    <button
+                                      key={r.item.id}
+                                      className="pool-item"
+                                      title={`Добавить в выбранный день: ${r.item.title}`}
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void mutate(
+                                          `items/${r.item.id}/plan/`,
+                                          { period: "day", date },
+                                        )
+                                          .then(() =>
+                                            notify("Дело добавлено в день"),
+                                          )
+                                          .catch(() => {})
+                                      }
+                                    >
+                                      <Plus size={20} />
+                                      <span>{r.item.title}</span>
+                                    </button>
+                                  ))}
+                              </section>
+                            ))}
                           </div>
                         )}
-                      </div>
-                      <button
-                        className="text-button"
-                        onClick={() => setPage("inbox")}
-                      >
-                        <Inbox size={16} />
-                        Открыть входящие
-                      </button>
-                    </aside>
+                        {b.events.some((e) => eventInDay(e, date)) && (
+                          <div className="content-card">
+                            <div className="card-heading">
+                              <h2>Встречи</h2>
+                              <IconButton
+                                label="Обновить календарь"
+                                disabled={busy}
+                                onClick={() =>
+                                  void mutate("google/sync/").catch(() => {})
+                                }
+                              >
+                                <RefreshCw size={20} />
+                              </IconButton>
+                            </div>
+                            <p className="context-note">
+                              Отметки сохраняются только в Опоре
+                            </p>
+                            <EventList
+                              events={b.events.filter((e) =>
+                                eventInDay(e, date),
+                              )}
+                              chronological
+                            />
+                          </div>
+                        )}
+                      </aside>
+                    )}
                   </div>
                 )}
                 {page === "week" && (
                   <>
-                    <div className="week-summary">
-                      <div>
-                        <span className="eyebrow">ОБЯЗАТЕЛЬСТВА</span>
-                        <strong>
-                          {weekActive.filter((r) => r.direct).length}
-                        </strong>
-                        <span>выбрано напрямую</span>
-                      </div>
-                      <div>
-                        <span className="eyebrow">ДВИЖЕНИЕ</span>
-                        <strong>
-                          {weekDone}
-                          <small> / {weekActive.length}</small>
-                        </strong>
-                        <span>дел завершено</span>
-                      </div>
-                      <div className="summary-note">
-                        <Leaf size={28} />
-                        <p>
-                          Суббота — начало недели.
-                          <br />
-                          Вечер пятницы — подвести итоги.
-                        </p>
-                      </div>
-                    </div>
                     <div className="content-card">
                       <div className="card-heading">
-                        <h2>План недели</h2>
+                        <h2>
+                          Обязательства{" "}
+                          <span>
+                            {weekActive.filter((r) => r.direct).length}
+                          </span>
+                        </h2>
+                        <span className="list-progress">
+                          {weekDone}/{weekActive.length} выполнено
+                        </span>
                         <a
-                          className="text-button"
+                          className="icon-button"
+                          aria-label="Скачать неделю в Markdown"
+                          title="Скачать неделю в Markdown"
                           href={"/api/export/?date=" + date}
                         >
-                          <Download size={15} />
-                          Markdown
+                          <Download size={16} />
                         </a>
                       </div>
-                      {weekSections.map((section) => {
-                        const contextRows = b.items.filter((item) => item.kind === "project").map((item): WeekRow => ({
-                          item, contextOnly: true, scheduled_day: null, direct: false,
-                          inherited: false, active: false, entry_id: null, outcome: "", reason: "",
-                        }));
-                        const days = Array.from({ length: 7 }, (_, i) => addDays(b.week, i));
-                        const dayTrees = new Map(days.map((day) => [day, groupWeeklyRows(
-                          section.rows.filter((row) => row.scheduled_day === day), contextRows,
-                        )]));
-                        const datedProjectIds = new Set<string>();
-                        function collectProjects(nodes: WeeklyNode<WeekRow>[]) {
-                          for (const node of nodes) {
-                            if (node.row.item.kind === "project") datedProjectIds.add(node.row.item.id);
-                            collectProjects(node.children);
+                      {weekSections
+                        .filter(
+                          (section) =>
+                            section.rows.length > 0 &&
+                            (!area || section.id === String(area)),
+                        )
+                        .map((section) => {
+                          const contextRows = b.items
+                            .filter((item) => item.kind === "project")
+                            .map(
+                              (item): WeekRow =>
+                                b.week_rows.find(
+                                  (row) =>
+                                    row.item.id === item.id && row.active,
+                                ) || {
+                                  item,
+                                  contextOnly: true,
+                                  scheduled_day: null,
+                                  direct: false,
+                                  inherited: false,
+                                  active: false,
+                                  entry_id: null,
+                                  outcome: "",
+                                  reason: "",
+                                },
+                            );
+                          const days = Array.from({ length: 7 }, (_, i) =>
+                            addDays(b.week, i),
+                          );
+                          const dayTrees = new Map(
+                            days.map((day) => [
+                              day,
+                              groupWeeklyRows(
+                                section.rows.filter(
+                                  (row) => row.scheduled_day === day,
+                                ),
+                                contextRows,
+                              ),
+                            ]),
+                          );
+                          const datedProjectIds = new Set<string>();
+                          function collectProjects(
+                            nodes: WeeklyNode<WeekRow>[],
+                          ) {
+                            for (const node of nodes) {
+                              if (node.row.item.kind === "project")
+                                datedProjectIds.add(node.row.item.id);
+                              collectProjects(node.children);
+                            }
                           }
-                        }
-                        for (const nodes of dayTrees.values()) collectProjects(nodes);
-                        const undatedTree = omitWeeklyProjects(groupWeeklyRows(
-                          section.rows.filter((row) => !row.scheduled_day), contextRows,
-                        ), datedProjectIds);
-                        return (
-                        <section className="week-area-section" key={section.id}>
-                          <div className="card-heading week-area-heading">
-                            <h3>
-                              <i style={{ background: section.color }} />
-                              {section.name}
-                              <span>{section.rows.length}</span>
-                            </h3>
-                            <button
-                              className="week-area-add"
-                              title={`Добавить дело: ${section.name}`}
-                              aria-label={`Добавить дело: ${section.name}`}
-                              disabled={busy}
-                              onClick={() => setEditor({
-                                kind: "task",
-                                plannedWeek: b.week,
-                                areas: section.id === "unassigned" ? [] : [Number(section.id)],
-                              })}
+                          for (const nodes of dayTrees.values())
+                            collectProjects(nodes);
+                          const undatedTree = omitWeeklyProjects(
+                            groupWeeklyRows(
+                              section.rows.filter((row) => !row.scheduled_day),
+                              contextRows,
+                            ),
+                            datedProjectIds,
+                          );
+                          return (
+                            <section
+                              className="week-area-section"
+                              key={section.id}
                             >
-                              <Plus size={16} />
-                            </button>
-                          </div>
-                          {Array.from({ length: 7 }, (_, i) => addDays(b.week, i)).map((day) => {
-                            const rows = section.rows.filter((row) => row.scheduled_day === day);
-                            const events = section.events.filter((event) => eventInDay(event, day));
-                            return rows.length > 0 || events.length > 0 ? (
-                              <div className="calendar-day week-area-events" key={day}>
-                                <h3>{fmt(day, {
-                                  weekday: "short",
-                                  day: "numeric",
-                                  month: "short",
-                                })}</h3>
-                                {dayTrees.get(day)!.map((node) => renderWeeklyNode(node))}
-                                <EventList events={events} chronological />
+                              <div className="card-heading week-area-heading">
+                                <h3>
+                                  <i style={{ background: section.color }} />
+                                  {section.name}
+                                  <span>{section.rows.length}</span>
+                                </h3>
+                                <button
+                                  className="week-area-add"
+                                  title={`Добавить дело: ${section.name}`}
+                                  aria-label={`Добавить дело: ${section.name}`}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    setEditor({
+                                      kind: "task",
+                                      plannedWeek: b.week,
+                                      areas:
+                                        section.id === "unassigned"
+                                          ? []
+                                          : [Number(section.id)],
+                                    })
+                                  }
+                                >
+                                  <Plus size={16} />
+                                </button>
                               </div>
-                            ) : null;
-                          })}
-                          {undatedTree.map((node) => renderWeeklyNode(node))}
-                          {!section.rows.length && !section.events.length && (
-                            <p className="week-area-empty">В этой сфере пока нет дел и событий на неделю</p>
-                          )}
-                        </section>
-                        );
-                      })}
+                              {Array.from({ length: 7 }, (_, i) =>
+                                addDays(b.week, i),
+                              ).map((day) => {
+                                const rows = section.rows.filter(
+                                  (row) => row.scheduled_day === day,
+                                );
+                                const events = section.events.filter((event) =>
+                                  eventInDay(event, day),
+                                );
+                                return rows.length > 0 || events.length > 0 ? (
+                                  <div
+                                    className="calendar-day week-area-events"
+                                    key={day}
+                                  >
+                                    <h3>
+                                      {fmt(day, {
+                                        weekday: "short",
+                                        day: "numeric",
+                                        month: "short",
+                                      })}
+                                    </h3>
+                                    {dayTrees
+                                      .get(day)!
+                                      .map((node) => renderWeeklyNode(node))}
+                                    <EventList events={events} chronological />
+                                  </div>
+                                ) : null;
+                              })}
+                              {undatedTree.map((node) =>
+                                renderWeeklyNode(node),
+                              )}
+                              {!section.rows.length &&
+                                !section.events.length && (
+                                  <p className="week-area-empty">
+                                    В этой сфере пока нет дел и событий на
+                                    неделю
+                                  </p>
+                                )}
+                            </section>
+                          );
+                        })}
+                      {!weekActive.length && (
+                        <div className="empty">
+                          <h3>
+                            {search || area
+                              ? "Ничего не найдено"
+                              : "Нет обязательств на эту неделю"}
+                          </h3>
+                          <button
+                            className="text-button"
+                            onClick={() =>
+                              search || area
+                                ? (setSearch(""), setArea(null))
+                                : setPicker("week")
+                            }
+                          >
+                            {search || area
+                              ? "Сбросить фильтры"
+                              : "Выбрать дела недели"}
+                          </button>
+                        </div>
+                      )}
                       {b.week_rows
                         .filter((r) => !r.active)
                         .map((r) => (
@@ -1422,121 +1578,124 @@ function Workspace({ session }: { session: any }) {
                           </div>
                         ))}
                     </div>
-                    <div className="content-card">
-                      <div className="card-heading">
-                        <h2>Дела по дням без обязательств</h2>
-                        <span>{weekDayTasks.length}</span>
-                      </div>
-                      <p className="aside-description">
-                        Назначены на дни этой недели и не входят в её обязательства.
-                      </p>
-                      {Array.from({ length: 7 }, (_, i) => addDays(b.week, i)).map((day) => {
-                        const tasks = weekDayTasks.filter((item) => item.schedule.some(
-                          (entry) => entry.period === "day" && entry.date === day,
-                        ));
-                        return tasks.length > 0 ? (
-                          <div className="calendar-day" key={day}>
-                            <h3>{fmt(day, { weekday: "short", day: "numeric", month: "short" })}</h3>
-                            {weekSections.map((section) => {
-                              const areaTasks = tasks.filter((item) => belongsToArea(item, section.id));
-                              return areaTasks.length > 0 ? (
-                                <section className="week-area-section" key={section.id}>
-                                  <div className="card-heading week-area-heading">
-                                    <h3><i style={{ background: section.color }} />{section.name}<span>{areaTasks.length}</span></h3>
-                                  </div>
-                                  {areaTasks.map((item) => <ItemRow key={item.id} item={item} compact hideAreas scheduledDay={day} />)}
-                                </section>
-                              ) : null;
-                            })}
-                          </div>
-                        ) : null;
-                      })}
-                      {!weekDayTasks.length && (
-                        <p className="week-area-empty">На дни этой недели нет дел вне обязательств.</p>
-                      )}
-                    </div>
-                    <div className="content-card">
-                      <div className="card-heading">
-                        <div className="schedule-heading">
-                              {b.google.connected && (
-                                <button
-                                  className="calendar-refresh"
-                                  disabled={busy}
-                                  title="Обновить календарь"
-                                  aria-label="Обновить календарь"
-                                  onClick={() =>
-                                    void mutate("google/sync/")
-                                      .then(() =>
-                                        notify("Расписание обновлено"),
-                                      )
-                                      .catch(() => {})
-                                  }
-                                >
-                                  <RefreshCw size={15} />
-                                </button>
-                              )}
-                              <h2>Календарь недели</h2>
-                            </div>
-                      </div>
-                      {Array.from({ length: 7 }, (_, i) =>
-                        addDays(b.week, i),
-                      ).map((d) => (
-                        <div className="calendar-day" key={d}>
-                          <h3>
-                            {fmt(d, {
-                              weekday: "short",
-                              day: "numeric",
-                              month: "short",
-                            })}
-                            {d === b.week && (
-                              <small className="week-edge">Начало недели</small>
-                            )}
-                            {d === addDays(b.week, 6) && (
-                              <small className="week-edge">
-                                Вечером — итоги недели
-                              </small>
-                            )}
-                          </h3>
-                          <EventList
-                            events={b.events.filter((e) => eventInDay(e, d))}
-                            chronological
-                          />
-                          {!b.events.some((e) => eventInDay(e, d)) && (
-                            <span className="muted">Нет встреч</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="content-card">
-                      <div className="card-heading">
-                        <h2>Итог прошлой недели</h2>
-                        <button
-                          className="text-button"
-                          onClick={() => setDate(addDays(b.week, -7))}
-                        >
-                          Посмотреть прошлую неделю
-                        </button>
-                      </div>
-                    </div>
+
+                    {!!weekDayTasks.length && (
+                      <Disclosure
+                        title="Дела по дням без обязательств"
+                        count={weekDayTasks.length}
+                      >
+                        {Array.from({ length: 7 }, (_, i) =>
+                          addDays(b.week, i),
+                        ).map((day) => {
+                          const tasks = weekDayTasks.filter((item) =>
+                            item.schedule.some(
+                              (entry) =>
+                                entry.period === "day" && entry.date === day,
+                            ),
+                          );
+                          return tasks.length ? (
+                            <section className="calendar-day" key={day}>
+                              <h3>
+                                {fmt(day, {
+                                  weekday: "short",
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                              </h3>
+                              {tasks.map((item) => (
+                                <TaskRow
+                                  context={rowContext}
+                                  key={item.id}
+                                  item={item}
+                                  compact
+                                />
+                              ))}
+                            </section>
+                          ) : null;
+                        })}
+                      </Disclosure>
+                    )}
+                    <PlanningPanel
+                      api={api}
+                      period="week"
+                      date={date}
+                      today={b.today}
+                      items={b.items}
+                      area={area}
+                      search={search}
+                      onOpen={(id) =>
+                        setDetail(b.items.find((i) => i.id === id) || null)
+                      }
+                    />
+                    <Disclosure
+                      title="Привычки"
+                      count={
+                        habits.filter((h) =>
+                          h.cells.some(
+                            (c) => c.expected || c.state !== "unrecorded",
+                          ),
+                        ).length
+                      }
+                    >
+                      <HabitWeek
+                        habits={habits}
+                        week={b.week}
+                        today={b.today}
+                        areas={b.areas}
+                        sections={b.day_sections}
+                        area={area}
+                        search={search}
+                        api={api}
+                      />
+                    </Disclosure>
+                    {!!b.events.length && (
+                      <Disclosure
+                        title="Календарь недели"
+                        count={b.events.length}
+                      >
+                        <p className="context-note">
+                          Отметки сохраняются только в Опоре
+                        </p>
+                        {Array.from({ length: 7 }, (_, i) =>
+                          addDays(b.week, i),
+                        ).map((day) => {
+                          const events = b.events.filter((e) =>
+                            eventInDay(e, day),
+                          );
+                          return events.length ? (
+                            <section className="calendar-day" key={day}>
+                              <h3>
+                                {fmt(day, {
+                                  weekday: "short",
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                              </h3>
+                              <EventList events={events} chronological />
+                            </section>
+                          ) : null;
+                        })}
+                      </Disclosure>
+                    )}
+                    <ReflectionEditor
+                      key={`week-${b.week}`}
+                      api={api}
+                      period="week"
+                      date={date}
+                      compact
+                    />
                   </>
                 )}
                 {page === "projects" && (
                   <div className="content-card">
-                    <div className="card-heading">
-                      <h2>Проекты и шаги</h2>
-                      <span>
-                        {
-                          b.items.filter(
-                            (i) => i.kind === "project" && i.status === "open",
-                          ).length
-                        }{" "}
-                        открытых проектов
-                      </span>
-                    </div>
                     {weekSections.map((section) => {
-                      const projects = b.items.filter((i) =>
-                        i.parent === null && i.kind === "project" && i.status !== "graveyard" &&
-                        belongsToArea(i, section.id) && (match(i) || b.items.some((c) => c.parent === i.id && match(c))),
+                      const projects = b.items.filter(
+                        (i) =>
+                          i.parent === null &&
+                          i.kind === "project" &&
+                          i.status !== "graveyard" &&
+                          belongsToArea(i, section.id) &&
+                          branchMatches(i),
                       );
                       function tree(
                         parent: string | null,
@@ -1547,15 +1706,11 @@ function Workspace({ session }: { session: any }) {
                             (i) =>
                               i.parent === parent &&
                               i.status !== "graveyard" &&
-                              (parent !== null || (i.kind === "project" && belongsToArea(i, section.id))),
+                              (parent !== null ||
+                                (i.kind === "project" &&
+                                  belongsToArea(i, section.id))),
                           )
-                          .filter(
-                            (i) =>
-                              match(i) ||
-                              b!.items.some(
-                                (c) => c.parent === i.id && match(c),
-                              ),
-                          )
+                          .filter((i) => branchMatches(i))
                           .sort(compareCompletion)
                           .map((i) => (
                             <div
@@ -1563,65 +1718,148 @@ function Workspace({ session }: { session: any }) {
                               className="tree-node"
                               data-depth={depth}
                             >
-                              <ItemRow item={i} hideAreas hideParent />
+                              <TaskRow
+                                context={rowContext}
+                                item={i}
+                                hideAreas
+                                hideParent
+                              />
                               {i.kind === "project" && (
                                 <>
-                                  <div className="project-children">{tree(i.id, depth + 1)}</div>
-                                  <button
-                                    className="add-child"
-                                    onClick={() => setEditor({ parent: i.id })}
-                                  >
-                                    <Plus size={14} />
-                                    Следующий шаг
-                                  </button>
+                                  <div className="project-children">
+                                    {tree(i.id, depth + 1)}
+                                  </div>
                                 </>
                               )}
                             </div>
                           ));
                       }
+                      if (
+                        !projects.length ||
+                        (area && section.id !== String(area))
+                      )
+                        return null;
                       return (
                         <section className="week-area-section" key={section.id}>
-                          {renderAreaHeading(section, "project", projects.length)}
+                          {renderAreaHeading(
+                            section,
+                            "project",
+                            projects.length,
+                          )}
                           {tree(null, 0)}
-                          {!projects.length && <p className="week-area-empty">В этой сфере пока нет проектов</p>}
+                          {!projects.length && (
+                            <p className="week-area-empty">
+                              В этой сфере пока нет проектов
+                            </p>
+                          )}
                         </section>
                       );
                     })}
+                    {!b.items.some(
+                      (i) =>
+                        i.parent === null &&
+                        i.kind === "project" &&
+                        i.status !== "graveyard" &&
+                        branchMatches(i),
+                    ) && (
+                      <div className="empty">
+                        <h3>
+                          {search || area
+                            ? "Ничего не найдено"
+                            : "Нет проектов"}
+                        </h3>
+                        <button
+                          className="text-button"
+                          onClick={() =>
+                            search || area
+                              ? (setSearch(""), setArea(null))
+                              : setEditor({ kind: "project" })
+                          }
+                        >
+                          {search || area
+                            ? "Сбросить фильтры"
+                            : "Создать проект"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {page === "ideas" && (
                   <div className="content-card">
-                    <div className="card-heading">
-                      <h2>Идеи без обязательств</h2>
-                      <span>Можно просто хранить</span>
-                    </div>
                     {weekSections.map((section) => {
-                      const ideas = b.items.filter((i) =>
-                        i.kind === "idea" && i.status === "open" && match(i) && belongsToArea(i, section.id),
+                      const ideas = b.items.filter(
+                        (i) =>
+                          i.kind === "idea" &&
+                          i.status === "open" &&
+                          match(i) &&
+                          belongsToArea(i, section.id),
                       );
+                      if (
+                        !ideas.length ||
+                        (area && section.id !== String(area))
+                      )
+                        return null;
                       return (
                         <section className="week-area-section" key={section.id}>
                           {renderAreaHeading(section, "idea", ideas.length)}
-                          {ideas.map((i) => <ItemRow key={i.id} item={i} hideAreas />)}
-                          {!ideas.length && <p className="week-area-empty">В этой сфере пока нет идей</p>}
+                          {ideas.map((i) => (
+                            <TaskRow
+                              context={rowContext}
+                              key={i.id}
+                              item={i}
+                              hideAreas
+                            />
+                          ))}
+                          {!ideas.length && (
+                            <p className="week-area-empty">
+                              В этой сфере пока нет идей
+                            </p>
+                          )}
                         </section>
                       );
                     })}
+                    {!b.items.some(
+                      (i) =>
+                        i.kind === "idea" && i.status === "open" && match(i),
+                    ) && (
+                      <div className="empty">
+                        <h3>
+                          {search || area
+                            ? "Ничего не найдено"
+                            : "Нет сохранённых идей"}
+                        </h3>
+                        <button
+                          className="text-button"
+                          onClick={() =>
+                            search || area
+                              ? (setSearch(""), setArea(null))
+                              : setEditor({ kind: "idea" })
+                          }
+                        >
+                          {search || area
+                            ? "Сбросить фильтры"
+                            : "Сохранить идею"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {page === "graveyard" && (
                   <div className="content-card">
-                    <div className="card-heading">
-                      <h2>Отпущенные дела</h2>
-                      <span>Решение можно изменить</span>
-                    </div>
                     {b.items
                       .filter((i) => i.status === "graveyard" && match(i))
                       .map((i) => (
-                        <ItemRow key={i.id} item={i} />
+                        <TaskRow context={rowContext} key={i.id} item={i} />
                       ))}
                     {b.captures
-                      .filter((c) => c.status === "graveyard")
+                      .filter(
+                        (c) =>
+                          c.status === "graveyard" &&
+                          (!search ||
+                            c.text
+                              .toLocaleLowerCase()
+                              .includes(search.toLocaleLowerCase())),
+                      )
                       .map((c) => (
                         <div className="capture-row" key={c.id}>
                           <p>{c.text}</p>
@@ -1637,11 +1875,20 @@ function Workspace({ session }: { session: any }) {
                           </button>
                         </div>
                       ))}
-                    {!b.items.some((i) => i.status === "graveyard") &&
-                      !b.captures.some((c) => c.status === "graveyard") && (
+                    {!b.items.some(
+                      (i) => i.status === "graveyard" && match(i),
+                    ) &&
+                      !b.captures.some(
+                        (c) =>
+                          c.status === "graveyard" &&
+                          (!search ||
+                            c.text
+                              .toLocaleLowerCase()
+                              .includes(search.toLocaleLowerCase())),
+                      ) && (
                         <Empty
-                          title="Здесь пока пусто"
-                          text="Отказ от ненужного освобождает место для важного."
+                          title="Нет отпущенных дел"
+                          text="Здесь появятся дела, которые можно восстановить."
                         />
                       )}
                   </div>
@@ -1662,8 +1909,8 @@ function Workspace({ session }: { session: any }) {
                       </p>
                       {!b.google.configured && (
                         <div className="info">
-                          Для подключения сначала укажи настройки Google OAuth
-                          на сервере. Порядок описан в README проекта.
+                          Подключение календаря ещё не настроено. Обратись к
+                          администратору пространства.
                         </div>
                       )}
                       <div className="button-row">
@@ -1694,7 +1941,7 @@ function Workspace({ session }: { session: any }) {
                                   .catch(() => {})
                               }
                             >
-                              <RefreshCw size={15} />
+                              <RefreshCw size={16} />
                               Обновить
                             </button>
                             <button
@@ -1734,11 +1981,13 @@ function Workspace({ session }: { session: any }) {
                               aria-label="Обновить список календарей"
                               onClick={() =>
                                 void mutate("google/calendars/")
-                                  .then(() => notify("Список календарей обновлён"))
+                                  .then(() =>
+                                    notify("Список календарей обновлён"),
+                                  )
                                   .catch(() => {})
                               }
                             >
-                              <RefreshCw size={15} />
+                              <RefreshCw size={16} />
                             </button>
                             <h3>Календари с занятым временем</h3>
                           </div>
@@ -1768,6 +2017,7 @@ function Workspace({ session }: { session: any }) {
                         </div>
                       )}
                     </div>
+                    <ReflectionTemplates api={api} />
                     <DaySectionsSettings
                       sections={b.day_sections}
                       busy={busy}
@@ -1802,9 +2052,87 @@ function Workspace({ session }: { session: any }) {
               </>
             )
           )}
-          <footer>опора · место для важного</footer>
         </div>
       </main>
+      <nav className="mobile-nav" aria-label="Основные разделы">
+        {(
+          [
+            ["day", "День", <CalendarDays size={20} />],
+            ["week", "Неделя", <CalendarRange size={20} />],
+            ["inbox", "Входящие", <Inbox size={20} />],
+          ] as [Page, string, React.ReactNode][]
+        ).map(([key, label, icon]) => (
+          <button
+            key={key}
+            className={page === key ? "active" : ""}
+            aria-current={page === key ? "page" : undefined}
+            onClick={() => navigate(key)}
+          >
+            {icon}
+            <span>{label}</span>
+          </button>
+        ))}
+        <button
+          aria-expanded={moreOpen}
+          className={!["day", "week", "inbox"].includes(page) ? "active" : ""}
+          onClick={() => setMoreOpen(true)}
+        >
+          <Menu size={20} />
+          <span>Ещё</span>
+        </button>
+      </nav>
+      {moreOpen && (
+        <Modal title="Разделы" onClose={() => setMoreOpen(false)}>
+          <div className="more-navigation">
+            {nav
+              .filter(([key]) => !["day", "week", "inbox"].includes(key))
+              .map(([key, label, icon]) => (
+                <button key={key} onClick={() => navigate(key)}>
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            <button onClick={() => navigate("settings")}>
+              <Settings size={20} />
+              Настройки
+            </button>
+            <button onClick={() => void signOut()}>
+              <LogOut size={20} />
+              Выйти
+            </button>
+          </div>
+        </Modal>
+      )}
+      {picker && b && (
+        <PlanPicker
+          period={picker}
+          date={picker === "day" ? date : b.week}
+          board={b}
+          onClose={() => setPicker(null)}
+          onCreate={() => {
+            const target = picker;
+            setPicker(null);
+            setEditor({
+              kind: "task",
+              plannedDay: target === "day" ? date : undefined,
+              plannedWeek: target === "week" ? b.week : undefined,
+            });
+          }}
+          onSelect={async (ids) => {
+            for (const id of ids)
+              await mutate(`items/${id}/plan/`, {
+                period: picker,
+                date: picker === "day" ? date : b.week,
+              });
+            setPicker(null);
+            notify(
+              picker === "day"
+                ? "Дела добавлены в день"
+                : "Обязательства недели выбраны",
+            );
+          }}
+        />
+      )}
       {weekProject && b && (
         <WeekProjectPicker
           project={weekProject}
@@ -1815,8 +2143,11 @@ function Workspace({ session }: { session: any }) {
           }}
           onCreate={async (title) => {
             await mutate("items/", {
-              title, kind: "task", parent: weekProject.id,
-              areas: weekProject.areas, planned_week: b.week,
+              title,
+              kind: "task",
+              parent: weekProject.id,
+              areas: weekProject.areas,
+              planned_week: b.week,
             });
             notify("Новое дело добавлено в план недели");
           }}
@@ -1827,8 +2158,16 @@ function Workspace({ session }: { session: any }) {
           initial={editor}
           board={b}
           busy={busy}
-          onClose={() => setEditor(null)}
+          onClose={() => {
+            setEditor(null);
+            setError("");
+          }}
           onSave={async (values) => {
+            if (!editor.item && editor.proposal)
+              values = {
+                ...values,
+                [`planned_${editor.proposal.period}`]: editor.proposal.date,
+              };
             await mutate(
               editor.item ? `items/${editor.item.id}/` : "items/",
               values,
@@ -1855,9 +2194,16 @@ function Workspace({ session }: { session: any }) {
             setEditor({ item: i });
             setDetail(null);
           }}
-          onState={askState}
-          onPlan={openSchedule}
+          onState={(item, status) => {
+            setDetail(null);
+            askState(item, status);
+          }}
+          onPlan={(item) => {
+            setDetail(null);
+            openSchedule(item);
+          }}
           onChangeSection={(entry) => {
+            setDetail(null);
             setSchedule(entry.item_detail);
             setScheduleDate(entry.date);
             setPeriod("day");
@@ -1899,15 +2245,24 @@ function Workspace({ session }: { session: any }) {
                 {schedule.kind !== "project" && (
                   <option value="day">День</option>
                 )}
-                <option value="week">
-                  Неделя · Сб–Пт — завершить к вечеру пятницы
-                </option>
+                <option value="week">Неделя · обязательство</option>
+                <option value="month">Месяц · предложение</option>
+                <option value="quarter">Квартал · предложение</option>
               </select>
             </label>
+            <p className="info">
+              {period === "week"
+                ? "Неделя начинается в субботу в 05:00. Проект включает все открытые дочерние дела."
+                : period === "day"
+                  ? "День начинается в 05:00. Назначение на день не создаёт недельного обязательства."
+                  : "Предложение без обязательства завершить к концу периода."}
+            </p>
             <label>
               {period === "day"
                 ? "Дата"
-                : "Любой день недели с субботы по пятницу"}
+                : period === "week"
+                  ? "Любой день недели с субботы по пятницу"
+                  : "Любая дата внутри периода"}
               <input
                 type="date"
                 value={scheduleDate}
@@ -1973,10 +2328,25 @@ function Workspace({ session }: { session: any }) {
                       : {}),
                   });
                 setDecision(null);
-                notify("Решение сохранено");
+                notify(
+                  decision.entry
+                    ? decision.title.replace("Снять", "Снято")
+                    : decision.status === "done"
+                      ? "Проект завершён"
+                      : decision.status === "graveyard"
+                        ? "Дело отпущено"
+                        : "Дело восстановлено",
+                );
               } catch {}
             }}
           >
+            {decision.entry && (
+              <p className="info">
+                {decision.reason
+                  ? "Снятие с недели сохранит дело. Укажи причину изменения обязательства."
+                  : "Снятие с плана сохранит дело и его историю."}
+              </p>
+            )}
             {decision.reason && (
               <label>
                 Почему меняешь недельное обязательство?
@@ -2008,7 +2378,13 @@ function Workspace({ session }: { session: any }) {
                 Отмена
               </button>
               <button className="primary" disabled={busy}>
-                Подтвердить
+                {decision.entry
+                  ? decision.title
+                  : decision.status === "done"
+                    ? "Завершить проект"
+                    : decision.status === "graveyard"
+                      ? "Отпустить дело"
+                      : "Восстановить дело"}
               </button>
             </div>
           </form>
@@ -2048,7 +2424,12 @@ function Workspace({ session }: { session: any }) {
               return depth(z) - depth(a);
             })
             .map((i) => (
-              <ItemRow key={i.id} item={i} hideParent={i.parent === closure.id} />
+              <TaskRow
+                context={rowContext}
+                key={i.id}
+                item={i}
+                hideParent={i.parent === closure.id}
+              />
             ))}
           {!b.items.some(
             (i) => i.parent === closure.id && i.status === "open",
@@ -2072,7 +2453,7 @@ function Workspace({ session }: { session: any }) {
                   askState(i, "graveyard");
                 }}
               >
-                Не буду делать
+                Отпустить проект
               </button>
             </div>
           )}
@@ -2150,34 +2531,26 @@ function Modal({
   layer?: number;
   className?: string;
 }) {
-  React.useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [onClose]);
   return (
-    <div className="modal-backdrop" style={{ zIndex: layer }} onClick={onClose}>
-      <section
-        className={`modal ${wide ? "wide" : ""} ${className}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h2>{title}</h2>
-          <button aria-label="Закрыть" onClick={onClose}>
-            <X size={21} />
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
+    <DialogSurface
+      title={title}
+      onClose={onClose}
+      wide={wide}
+      layer={layer}
+      className={className}
+    >
+      {children}
+    </DialogSurface>
   );
 }
-function WeekProjectPicker({ project, board, onClose, onPlan, onCreate }: {
+
+function WeekProjectPicker({
+  project,
+  board,
+  onClose,
+  onPlan,
+  onCreate,
+}: {
   project: Item;
   board: Board;
   onClose: () => void;
@@ -2189,49 +2562,122 @@ function WeekProjectPicker({ project, board, onClose, onPlan, onCreate }: {
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const candidates = board.items.filter((i) =>
-    i.parent === project.id && i.kind === "task" && i.status === "open",
+  const candidates = board.items.filter(
+    (i) => i.parent === project.id && i.kind === "task" && i.status === "open",
   );
-  const planned = new Set(board.week_rows.filter((r) => r.active && r.direct).map((r) => r.item.id));
+  const planned = new Set(
+    board.week_rows.filter((r) => r.active && r.direct).map((r) => r.item.id),
+  );
   async function save(action: () => Promise<void>) {
     setSaving(true);
     setError("");
-    try { await action(); } catch (e) { setError((e as Error).message); }
-    finally { setSaving(false); }
+    try {
+      await action();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   }
   return (
-    <Modal title="Добавить дела в неделю" onClose={() => { if (!saving) onClose(); }}>
-      <p className="modal-subtitle">{project.title} · {fmt(board.week)} – {fmt(addDays(board.week, 6))}</p>
-      <label>Существующие дела
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Найти дело проекта" />
+    <Modal
+      title="Добавить дела в неделю"
+      onClose={() => {
+        if (!saving) onClose();
+      }}
+    >
+      <p className="modal-subtitle">
+        {project.title} · {fmt(board.week)} – {fmt(addDays(board.week, 6))}
+      </p>
+      <label>
+        Существующие дела
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Найти дело проекта"
+        />
       </label>
       <div className="week-project-picker-list">
-        {candidates.filter((i) => i.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map((i) => (
-          <label className="week-project-choice" key={i.id}>
-            <input type="checkbox" disabled={saving || planned.has(i.id)} checked={planned.has(i.id) || selected.includes(i.id)} onChange={(e) => setSelected((ids) => e.target.checked ? [...ids, i.id] : ids.filter((id) => id !== i.id))} />
-            <span>{i.title}{planned.has(i.id) && <small className="muted"> · Уже в плане</small>}</span>
-          </label>
-        ))}
-        {candidates.length === 0 && <p className="muted">У проекта пока нет открытых задач. Создай первое дело ниже.</p>}
+        {candidates
+          .filter((i) =>
+            i.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+          )
+          .map((i) => (
+            <label className="week-project-choice" key={i.id}>
+              <input
+                type="checkbox"
+                disabled={saving || planned.has(i.id)}
+                checked={planned.has(i.id) || selected.includes(i.id)}
+                onChange={(e) =>
+                  setSelected((ids) =>
+                    e.target.checked
+                      ? [...ids, i.id]
+                      : ids.filter((id) => id !== i.id),
+                  )
+                }
+              />
+              <span>
+                {i.title}
+                {planned.has(i.id) && (
+                  <small className="muted"> · Уже в плане</small>
+                )}
+              </span>
+            </label>
+          ))}
+        {candidates.length === 0 && (
+          <p className="muted">
+            У проекта пока нет открытых задач. Создай первое дело ниже.
+          </p>
+        )}
       </div>
-      <form onSubmit={(e) => {
-        e.preventDefault();
-        if (title.trim()) void save(async () => { await onCreate(title.trim()); setTitle(""); });
-      }}>
-        <label>Новое дело
-          <input autoFocus required maxLength={500} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Что сделать по проекту?" />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (title.trim())
+            void save(async () => {
+              await onCreate(title.trim());
+              setTitle("");
+            });
+        }}
+      >
+        <label>
+          Новое дело
+          <input
+            autoFocus
+            required
+            maxLength={500}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Что сделать по проекту?"
+          />
         </label>
-        <button className="primary" disabled={saving || !title.trim()}>Создать и добавить в неделю</button>
+        <button className="primary" disabled={saving || !title.trim()}>
+          Создать и добавить в неделю
+        </button>
       </form>
-      {error && <p role="alert" className="error">{error}</p>}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
       <div className="button-row">
-        <button className="primary" disabled={saving || selected.length === 0} onClick={() => void save(async () => {
-          for (const id of selected) {
-            await onPlan(id);
-            setSelected((ids) => ids.filter((value) => value !== id));
+        <button
+          className="primary"
+          disabled={saving || selected.length === 0}
+          onClick={() =>
+            void save(async () => {
+              for (const id of selected) {
+                await onPlan(id);
+                setSelected((ids) => ids.filter((value) => value !== id));
+              }
+            })
           }
-        })}>Добавить выбранные ({selected.length})</button>
-        <button disabled={saving} onClick={onClose}>Готово</button>
+        >
+          Добавить выбранные ({selected.length})
+        </button>
+        <button disabled={saving} onClick={onClose}>
+          Готово
+        </button>
       </div>
     </Modal>
   );
@@ -2251,6 +2697,7 @@ function ItemEditor({
     kind?: Item["kind"];
     plannedDay?: string;
     plannedWeek?: string;
+    proposal?: { period: "month" | "quarter"; date: string };
     areas?: number[];
     plannedSection?: string;
   };
@@ -2272,7 +2719,10 @@ function ItemEditor({
     [kind, setKind] = useState(item?.kind || initial.kind || "task"),
     [parent, setParent] = useState(item?.parent || initial.parent || ""),
     [areas, setAreas] = useState<number[]>(
-      item?.areas ?? board.items.find((i) => i.id === initial.parent)?.areas ?? initial.areas ?? [],
+      item?.areas ??
+        board.items.find((i) => i.id === initial.parent)?.areas ??
+        initial.areas ??
+        [],
     ),
     [comment, setComment] = useState(item?.comment || ""),
     [deadline, setDeadline] = useState(item?.deadline || ""),
@@ -2280,6 +2730,7 @@ function ItemEditor({
     [location, setLocation] = useState(item?.location || ""),
     [tags, setTags] = useState(item?.tags.join(", ") || ""),
     [minutes, setMinutes] = useState(item?.estimated_minutes?.toString() || ""),
+    [resultComment, setResultComment] = useState(item?.result_comment || ""),
     [localError, setLocalError] = useState("");
   const forbiddenParents = new Set<string>();
   if (item) {
@@ -2287,7 +2738,12 @@ function ItemEditor({
     let frontier = [item.id];
     while (frontier.length) {
       frontier = board.items
-        .filter((candidate) => candidate.parent && frontier.includes(candidate.parent) && !forbiddenParents.has(candidate.id))
+        .filter(
+          (candidate) =>
+            candidate.parent &&
+            frontier.includes(candidate.parent) &&
+            !forbiddenParents.has(candidate.id),
+        )
         .map((candidate) => candidate.id);
       frontier.forEach((id) => forbiddenParents.add(id));
     }
@@ -2358,6 +2814,9 @@ function ItemEditor({
                 .map((t) => t.trim())
                 .filter(Boolean),
               estimated_minutes: minutes ? Number(minutes) : null,
+              ...(item?.status === "done"
+                ? { result_comment: resultComment }
+                : {}),
             });
           } catch (e) {
             setLocalError((e as Error).message);
@@ -2365,8 +2824,15 @@ function ItemEditor({
         }}
       >
         <div className="item-editor-fields">
+          {initial.proposal && (
+            <p className="muted">
+              Новое дело добавится в{" "}
+              {initial.proposal.period === "month" ? "месячный" : "квартальный"}{" "}
+              план как предложение.
+            </p>
+          )}
           <label>
-            Название
+            Название дела
             <input
               autoFocus
               required
@@ -2402,42 +2868,6 @@ function ItemEditor({
               {board.captures.find((c) => c.id === initial.capture)?.text}
             </div>
           )}
-          <div className="form-grid">
-            <label>
-              Тип
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value as Item["kind"])}
-              >
-                {(!item || item.kind === "idea") && (
-                  <option value="idea">Идея</option>
-                )}
-                {(!item || item.kind !== "project") && (
-                  <option value="task">Задача</option>
-                )}
-                <option value="project">Проект</option>
-              </select>
-            </label>
-            <label>
-              Внутри проекта
-              <select
-                value={parent}
-                onChange={(e) => {
-                  setParent(e.target.value);
-                  if (!item) setAreas(board.items.find((i) => i.id === e.target.value)?.areas || []);
-                }}
-              >
-                <option value="">Самостоятельное дело</option>
-                {board.items
-                  .filter((i) => i.kind === "project" && i.status === "open" && !forbiddenParents.has(i.id))
-                  .map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
           {initial.capture && !item && kind !== "idea" && (
             <div className="form-grid">
               <label>
@@ -2467,40 +2897,88 @@ function ItemEditor({
               )}
             </div>
           )}
-          <label>
-            Сферы жизни <span className="muted">· можно несколько</span>
-          </label>
-          <div className="area-chips">
-            {board.areas.map((a) => (
-              <button
-                type="button"
-                key={a.id}
-                className={areas.includes(a.id) ? "selected" : ""}
-                onClick={() =>
-                  setAreas(
-                    areas.includes(a.id)
-                      ? areas.filter((id) => id !== a.id)
-                      : [...areas, a.id],
-                  )
-                }
-              >
-                <i style={{ background: a.color }} />
-                {a.name}
-                {areas.includes(a.id) && <Check size={12} />}
-              </button>
-            ))}
-          </div>
-          <label>
-            Комментарий
-            <textarea
-              rows={3}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Зачем это нужно? Что важно помнить?"
-            />
-          </label>
           <details className="editor-additional">
-            <summary>Дополнительно</summary>
+            <summary>Свойства дела</summary>
+            <div className="form-grid">
+              <label>
+                Тип
+                <select
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as Item["kind"])}
+                >
+                  {(!item || item.kind === "idea") && (
+                    <option value="idea">Идея</option>
+                  )}
+                  {(!item || item.kind !== "project") && (
+                    <option value="task">Задача</option>
+                  )}
+                  <option value="project">Проект</option>
+                </select>
+              </label>
+              <label>
+                Внутри проекта
+                <select
+                  value={parent}
+                  onChange={(e) => {
+                    setParent(e.target.value);
+                    if (!item)
+                      setAreas(
+                        board.items.find((i) => i.id === e.target.value)
+                          ?.areas || [],
+                      );
+                  }}
+                >
+                  <option value="">Самостоятельное дело</option>
+                  {board.items
+                    .filter(
+                      (i) =>
+                        i.kind === "project" &&
+                        i.status === "open" &&
+                        !forbiddenParents.has(i.id),
+                    )
+                    .map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <fieldset className="area-fieldset">
+              <legend>Сферы жизни · можно несколько</legend>
+              <div className="area-chips">
+                {board.areas.map((a) => (
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={areas.includes(a.id)}
+                    key={a.id}
+                    className={areas.includes(a.id) ? "selected" : ""}
+                    onClick={() =>
+                      setAreas(
+                        areas.includes(a.id)
+                          ? areas.filter((id) => id !== a.id)
+                          : [...areas, a.id],
+                      )
+                    }
+                  >
+                    <i style={{ background: a.color }} />
+                    {a.name}
+                    {areas.includes(a.id) && <Check size={16} />}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <label>
+              Комментарий
+              <textarea
+                rows={3}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Зачем это нужно? Что важно помнить?"
+              />
+            </label>
+
             <div className="form-grid">
               <label>
                 Дедлайн
@@ -2563,6 +3041,16 @@ function ItemEditor({
               </label>
             )}
           </details>
+          {item?.status === "done" && (
+            <label>
+              Комментарий к результату
+              <textarea
+                value={resultComment}
+                onChange={(e) => setResultComment(e.target.value)}
+                rows={3}
+              />
+            </label>
+          )}
           {localError && (
             <div role="alert" className="error">
               {localError}
@@ -2594,9 +3082,9 @@ const eventNames: Record<string, string> = {
   day_moved: "Перенесено",
   completed: "Выполнено",
   reopened: "Открыто повторно",
-  buried: "На кладбище",
+  buried: "Отпущено",
   restored: "Восстановлено",
-  plan_released: "Убрано из плана",
+  plan_released: "Снято с плана",
   commitment_released: "Снято обязательство",
   detached_on_restore: "Отсоединено от закрытого проекта",
 };
@@ -2651,7 +3139,12 @@ function HistoryChanges({
   );
 }
 
-function ProjectContents({ project, board, onSelect, onPlan }: {
+function ProjectContents({
+  project,
+  board,
+  onSelect,
+  onPlan,
+}: {
   project: Item;
   board: Board;
   onSelect: (item: Item) => void;
@@ -2666,49 +3159,83 @@ function ProjectContents({ project, board, onSelect, onPlan }: {
   }
   const visited = new Set<string>([project.id]);
   function renderChildren(parent: string): React.ReactNode {
-    const items = [...(children.get(parent) || [])].sort((a, b) =>
-      ({ open: 0, done: 1, graveyard: 2 }[a.status]) -
-      ({ open: 0, done: 1, graveyard: 2 }[b.status]),
-    ).filter((item) => !visited.has(item.id));
+    const items = [...(children.get(parent) || [])]
+      .sort(
+        (a, b) =>
+          ({ open: 0, done: 1, graveyard: 2 })[a.status] -
+          { open: 0, done: 1, graveyard: 2 }[b.status],
+      )
+      .filter((item) => !visited.has(item.id));
     if (!items.length) return null;
-    return <ul className="project-detail-list">{items.map((child) => {
-      visited.add(child.id);
-      return <li key={child.id}>
-        <div className={`project-detail-row status-${child.status}`}>
-          <div className="project-detail-content">
-            <button className="detail-step" onClick={() => onSelect(child)}>
-              <span>{child.kind === "project" && <FolderOpen size={14} />} {child.title}</span>
-              <ChevronRight size={16} />
-            </button>
-            <div className="project-detail-meta">
-              <span className={`project-detail-status status-${child.status}`}>
-                {child.status === "open" ? "Открыто" : child.status === "done" ? "Выполнено" : "На кладбище"}
-              </span>
-              {child.schedule.length === 0 && <span>Не запланировано</span>}
-              {preciseSchedule(child.schedule).map((plan) => <span key={`${plan.period}-${plan.date}`}>
-                <CalendarDays size={13} />
-                {plan.period === "week"
-                  ? `Неделя: ${fmt(plan.date)} – ${fmt(addDays(plan.date, 6))}`
-                  : fmt(plan.date, { day: "numeric", month: "long", year: "numeric" })}
-                {plan.inherited && " · через проект"}
-              </span>)}
-              {child.deadline && <span>Дедлайн: {fmt(child.deadline)}</span>}
-            </div>
-          </div>
-          {child.status === "open" && child.kind !== "idea" && <button
-            className="secondary project-detail-plan"
-            onClick={() => onPlan(child)}
-            aria-label={`Запланировать: ${child.title}`}
-            title="Запланировать"
-          ><CalendarDays size={14} /></button>}
-        </div>
-        {renderChildren(child.id)}
-      </li>;
-    })}</ul>;
+    return (
+      <ul className="project-detail-list">
+        {items.map((child) => {
+          visited.add(child.id);
+          return (
+            <li key={child.id}>
+              <div className={`project-detail-row status-${child.status}`}>
+                <div className="project-detail-content">
+                  <button
+                    className="detail-step"
+                    onClick={() => onSelect(child)}
+                  >
+                    <span>
+                      {child.kind === "project" && <FolderOpen size={16} />}{" "}
+                      {child.title}
+                    </span>
+                    <ChevronRight size={16} />
+                  </button>
+                  <div className="project-detail-meta">
+                    {child.status !== "open" && (
+                      <span
+                        className={`project-detail-status status-${child.status}`}
+                      >
+                        {child.status === "done" ? "Выполнено" : "Отпущено"}
+                      </span>
+                    )}
+                    {preciseSchedule(child.schedule)
+                      .filter((plan) => !plan.inherited)
+                      .map((plan) => (
+                        <span key={`${plan.period}-${plan.date}`}>
+                          <CalendarDays size={16} />
+                          {plan.period === "week"
+                            ? `Неделя: ${fmt(plan.date)} – ${fmt(addDays(plan.date, 6))}`
+                            : fmt(plan.date, {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                              })}
+                          {plan.inherited && " · через проект"}
+                        </span>
+                      ))}
+                    {child.deadline && (
+                      <span>Дедлайн: {fmt(child.deadline)}</span>
+                    )}
+                  </div>
+                </div>
+                {child.status === "open" && child.kind !== "idea" && (
+                  <button
+                    className="secondary project-detail-plan"
+                    onClick={() => onPlan(child)}
+                    aria-label={`Запланировать: ${child.title}`}
+                    title="Запланировать"
+                  >
+                    <CalendarDays size={16} />
+                  </button>
+                )}
+              </div>
+              {renderChildren(child.id)}
+            </li>
+          );
+        })}
+      </ul>
+    );
   }
-  return children.has(project.id)
-    ? renderChildren(project.id)
-    : <p className="muted">В проекте пока нет дел. Добавь первый шаг.</p>;
+  return children.has(project.id) ? (
+    renderChildren(project.id)
+  ) : (
+    <p className="muted">В проекте пока нет дел. Добавь первый шаг.</p>
+  );
 }
 
 function Detail({
@@ -2744,7 +3271,9 @@ function Detail({
     queryFn: () => api(`items/${item.id}/history/`),
   });
   const parent = board.items.find((candidate) => candidate.id === item.parent);
-  const hasChildren = board.items.some((candidate) => candidate.parent === item.id);
+  const hasChildren = board.items.some(
+    (candidate) => candidate.parent === item.id,
+  );
   const dayEntry = board.day_entries.find(
     (entry) => entry.item === item.id && entry.active,
   );
@@ -2752,37 +3281,62 @@ function Detail({
     <Modal layer={40} title={kindLabel[item.kind]} onClose={onClose} wide>
       <h2 className="detail-title">{item.title}</h2>
       <div className="button-row">
-        <button className="secondary" onClick={() => onEdit(item)}>
-          <Pencil size={15} />
-          Изменить
-        </button>
+        <IconButton label="Редактировать дело" onClick={() => onEdit(item)}>
+          <Pencil size={20} />
+        </IconButton>
         {item.status === "open" && item.kind !== "idea" && (
-          <button className="primary" onClick={() => onPlan(item)}>
-            Запланировать
-          </button>
+          <IconButton
+            label="Выбрать день или период"
+            onClick={() => onPlan(item)}
+          >
+            <CalendarDays size={20} />
+          </IconButton>
         )}
         {dayEntry && (
-          <button
-            className="secondary"
+          <IconButton
+            label="Изменить секцию дня"
             onClick={() => onChangeSection(dayEntry)}
           >
-            Изменить секцию
+            <ListPlus size={20} />
+          </IconButton>
+        )}
+        {item.kind === "project" && item.status === "open" && (
+          <button className="primary" onClick={() => onAdd(item)}>
+            <Plus size={20} />
+            Добавить шаг
           </button>
         )}
-        <button
-          disabled={item.kind === "idea" && item.status === "open"}
-          className="text-button"
-          onClick={() =>
-            onState(item, item.status === "open" ? "done" : "open")
-          }
-        >
-          {item.status === "open" ? "Завершить" : "Открыть повторно"}
-        </button>
+        {!(item.kind === "idea" && item.status === "open") && (
+          <button
+            className={
+              item.kind === "project" && item.status === "open"
+                ? "secondary"
+                : "primary"
+            }
+            onClick={() =>
+              onState(item, item.status === "open" ? "done" : "open")
+            }
+          >
+            {item.status === "graveyard"
+              ? "Восстановить дело"
+              : item.status === "done"
+                ? "Открыть повторно"
+                : item.kind === "project"
+                  ? "Завершить проект"
+                  : "Выполнить задачу"}
+          </button>
+        )}
       </div>
       {item.kind === "idea" && (
         <div className="info">
           Чтобы реализовать идею, измени её тип на задачу или проект.
         </div>
+      )}
+      {item.stale && (
+        <p className="info">
+          Название дела не менялось более 10 дней. Можно проверить его
+          актуальность.
+        </p>
       )}
       <dl className="detail-fields">
         <dt>Состояние</dt>
@@ -2791,14 +3345,38 @@ function Detail({
             ? "Открыто"
             : item.status === "done"
               ? "Выполнено"
-              : "На кладбище"}
+              : "Отпущено"}
         </dd>
+        {!!item.schedule.length && (
+          <>
+            <dt>Планирование</dt>
+            <dd className="detail-schedule">
+              {item.schedule.map((plan) => (
+                <span key={`${plan.period}-${plan.date}`}>
+                  {
+                    {
+                      day: "День выполнения",
+                      week: "Обязательство недели",
+                      month: "Предложение месяца",
+                      quarter: "Предложение квартала",
+                    }[plan.period]
+                  }
+                  : {fmt(plan.date)}
+                  {plan.inherited && " · через проект"}
+                </span>
+              ))}
+            </dd>
+          </>
+        )}
         {parent && (
           <>
-            <dt>Родитель</dt>
+            <dt>Проект</dt>
             <dd>
-              <button className="detail-parent-link" onClick={() => onSelect(parent)}>
-                <ChevronLeft size={15} />
+              <button
+                className="detail-parent-link"
+                onClick={() => onSelect(parent)}
+              >
+                <ChevronLeft size={16} />
                 <span>{parent.title}</span>
               </button>
             </dd>
@@ -2856,17 +3434,24 @@ function Detail({
       {(item.kind === "project" || hasChildren) && (
         <section className="detail-steps">
           <h3>{item.kind === "project" ? "Дела проекта" : "Дочерние дела"}</h3>
-          <ProjectContents project={item} board={board} onSelect={onSelect} onPlan={onPlan} />
-          {item.kind === "project" && <button className="add-child" onClick={() => onAdd(item)}>
-            <Plus size={14} /> Следующий шаг
-          </button>}
+          <ProjectContents
+            project={item}
+            board={board}
+            onSelect={onSelect}
+            onPlan={onPlan}
+          />
+          {item.kind === "project" && (
+            <button className="add-child" onClick={() => onAdd(item)}>
+              <Plus size={16} /> Следующий шаг
+            </button>
+          )}
         </section>
       )}
-      <div className="history">
-        <h3>
+      <details className="history">
+        <summary>
           <History size={16} />
           История
-        </h3>
+        </summary>
         {history.data?.map((e) => (
           <div className="history-row" key={e.id}>
             <time>
@@ -2893,7 +3478,7 @@ function Detail({
             </div>
           </div>
         ))}
-      </div>
+      </details>
     </Modal>
   );
 }
@@ -2905,3 +3490,129 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+function PlanPicker({
+  period,
+  date,
+  board,
+  onClose,
+  onSelect,
+  onCreate,
+}: {
+  period: "day" | "week";
+  date: string;
+  board: Board;
+  onClose: () => void;
+  onSelect: (ids: string[]) => Promise<void>;
+  onCreate: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]),
+    [search, setSearch] = useState(""),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState("");
+  const chosen = new Set(
+    period === "day"
+      ? board.day_entries.filter((e) => e.active).map((e) => e.item)
+      : board.week_rows.filter((r) => r.active).map((r) => r.item.id),
+  );
+  const items = board.items.filter(
+    (i) =>
+      i.status === "open" &&
+      (period === "week" ? i.kind !== "idea" : i.kind === "task") &&
+      !chosen.has(i.id) &&
+      i.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+  );
+  return (
+    <Modal
+      title={
+        period === "day"
+          ? "Добавить дела в день"
+          : "Выбрать обязательства недели"
+      }
+      onClose={() => {
+        if (!saving) onClose();
+      }}
+    >
+      <p className="modal-subtitle">
+        {fmt(date, { day: "numeric", month: "long" })}
+        {period === "week" && ` — ${fmt(addDays(date, 6))}`}
+      </p>
+      {period === "week" && (
+        <p className="info">
+          Выбранный проект включает все открытые дочерние дела. Снятие
+          начавшегося обязательства потребует причины.
+        </p>
+      )}
+      <label>
+        Поиск дел
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Название задачи или проекта"
+        />
+      </label>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (saving || !selected.length) return;
+          setSaving(true);
+          setError("");
+          try {
+            await onSelect(selected);
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <div className="picker-list">
+          {items.map((item) => (
+            <label className="picker-option" key={item.id}>
+              <input
+                type="checkbox"
+                checked={selected.includes(item.id)}
+                disabled={saving}
+                onChange={(e) =>
+                  setSelected((old) =>
+                    e.target.checked
+                      ? [...old, item.id]
+                      : old.filter((id) => id !== item.id),
+                  )
+                }
+              />
+              {item.kind === "project" && <FolderOpen size={16} />}
+              <span>{item.title}</span>
+            </label>
+          ))}
+          {!items.length && (
+            <p className="inline-empty">
+              {search ? "Ничего не найдено" : "Нет открытых дел для выбора"}
+            </p>
+          )}
+        </div>
+        {error && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button
+            className="secondary"
+            type="button"
+            disabled={saving}
+            onClick={onCreate}
+          >
+            <Plus size={20} />
+            Создать дело
+          </button>
+          <button className="primary" disabled={saving || !selected.length}>
+            {saving
+              ? "Добавляем…"
+              : `Добавить${selected.length ? ` · ${selected.length}` : ""}`}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

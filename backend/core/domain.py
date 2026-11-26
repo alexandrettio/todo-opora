@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from .models import Item, PlanEntry, History, InheritedPlanning
+from .periods import period_start
 
 TZ = ZoneInfo("Europe/Moscow")
 
@@ -190,10 +191,11 @@ def change_state(item, target, reason="", result_comment=None):
 def assign(item, period, day, section=""):
     if item.status != "open" or item.kind == "idea":
         raise ValidationError("Планировать можно открытые задачи и проекты.")
-    if period not in ["day", "week"]:
-        raise ValidationError("Допустимы день и неделя.")
+    if period not in ["day", "week", "month", "quarter"]:
+        raise ValidationError("Допустимы день, неделя, месяц и квартал.")
     today = planning_day()
-    if day < (today if period == "day" else week_start(today)):
+    day = period_start(period, day)
+    if day < period_start(period, today):
         raise ValidationError("Нельзя добавлять обязательства в прошедший период.")
     if period == "week":
         day = week_start(day)
@@ -235,7 +237,7 @@ def assign(item, period, day, section=""):
 
 def release(entry, reason=""):
     today = planning_day()
-    started = entry.date <= (today if entry.period == "day" else week_start(today))
+    started = entry.date <= period_start(entry.period, today)
     if entry.period == "week" and started and entry.item.status == "open":
         require_reason(reason)
     if not started:
